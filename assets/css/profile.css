@@ -712,6 +712,112 @@
     text-align: right;
 }
 
+/* View all ranks button + ladder modal */
+.kp-rank-viewall {
+    margin-top: 14px;
+    width: 100%;
+    padding: 8px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    color: #e8e8ee;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: 'Poppins', sans-serif;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+.kp-rank-viewall:hover {
+    background: rgba(255, 46, 99, 0.12);
+    border-color: rgba(255, 46, 99, 0.35);
+    color: #ff2e63;
+}
+
+.kp-rank-dialog { max-width: 520px; }
+
+.kp-rank-ladder {
+    padding: 16px 20px 22px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: min(70vh, 560px);
+}
+
+.kp-rank-tier {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    opacity: 0.55;
+}
+.kp-rank-tier.is-unlocked { opacity: 1; }
+.kp-rank-tier.is-current {
+    opacity: 1;
+    border-color: rgba(255, 46, 99, 0.45);
+    background: rgba(255, 46, 99, 0.08);
+    box-shadow: 0 0 0 1px rgba(255, 46, 99, 0.15);
+}
+
+.kp-rank-tier-badge {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    border: 1.5px solid;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 17px;
+    flex: 0 0 auto;
+}
+
+.kp-rank-tier-info {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    flex: 1;
+    min-width: 0;
+}
+.kp-rank-tier-title {
+    font-size: 14px;
+    font-weight: 700;
+    font-family: 'Poppins', sans-serif;
+}
+.kp-rank-tier-req {
+    font-size: 12px;
+    color: #8b8f95;
+    font-family: 'Poppins', sans-serif;
+}
+
+.kp-rank-tier-tag {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 999px;
+    flex: 0 0 auto;
+}
+.kp-rank-tier-tag.is-current {
+    background: #ff2e63;
+    color: #fff;
+}
+.kp-rank-tier-tag.is-unlocked {
+    background: rgba(25, 135, 84, 0.18);
+    color: #198754;
+    border: 1px solid rgba(25, 135, 84, 0.35);
+}
+.kp-rank-tier-tag.is-locked {
+    background: rgba(255, 255, 255, 0.06);
+    color: #6c757d;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
 /* --- Avatar row inside the profile tab --- */
 .kp-avatar-row {
     display: flex;

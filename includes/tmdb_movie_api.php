@@ -280,7 +280,7 @@ function tmdb_movie_detail($id) {
     $id = (int)$id;
     if ($id <= 0) return null;
 
-    $key = api_cache_key('tmdb_movie', ['detail', $id]);
+    $key = api_cache_key('tmdb_movie', ['detail:v2', $id]);
     $hit = api_cache_get($key);
     if (is_array($hit)) return $hit;
 
@@ -290,6 +290,10 @@ function tmdb_movie_detail($id) {
     $item = tmdb_movie_normalize($m);
     if (!$item) return null;
 
+    // Title logo (same artwork the hero slider uses)
+    $imgs = tmdb_get('/movie/' . $id . '/images', ['include_image_language' => 'en,ja,null']);
+    $item['title_logo'] = tmdb_pick_logo($imgs['logos'] ?? []);
+
     // Enrich with credits
     $credits = $m['credits'] ?? [];
     $directors = [];
@@ -297,8 +301,17 @@ function tmdb_movie_detail($id) {
     foreach (($credits['crew'] ?? []) as $c) {
         if (($c['job'] ?? '') === 'Director') $directors[] = $c['name'] ?? '';
     }
+    $item['cast_list'] = [];
     foreach (($credits['cast'] ?? []) as $c) {
-        $cast[] = $c['name'] ?? '';
+        if (empty($c['name'])) continue;
+        $cast[] = $c['name'];
+        if (count($item['cast_list']) < 12) {
+            $item['cast_list'][] = [
+                'name'      => $c['name'],
+                'character' => (string)($c['character'] ?? ''),
+                'photo'     => !empty($c['profile_path']) ? TMDB_IMAGE_BASE . $c['profile_path'] : '',
+            ];
+        }
     }
     $item['studios'] = [];
     $item['studio'] = implode(', ', array_slice($directors, 0, 3));
@@ -511,7 +524,7 @@ function tmdb_tv_detail($id) {
     $id = (int)$id;
     if ($id <= 0) return null;
 
-    $key = api_cache_key('tmdb_tv', ['detail', $id]);
+    $key = api_cache_key('tmdb_tv', ['detail:v2', $id]);
     $hit = api_cache_get($key);
     if (is_array($hit)) return $hit;
 
@@ -520,6 +533,10 @@ function tmdb_tv_detail($id) {
 
     $item = tmdb_tv_normalize($m);
     if (!$item) return null;
+
+    // Title logo (same artwork the hero slider uses)
+    $imgs = tmdb_get('/tv/' . $id . '/images', ['include_image_language' => 'en,ja,null']);
+    $item['title_logo'] = tmdb_pick_logo($imgs['logos'] ?? []);
 
     // Build episodes list from seasons
     $episodesList = [];
@@ -547,8 +564,17 @@ function tmdb_tv_detail($id) {
             $creators[] = $c['name'] ?? '';
         }
     }
+    $item['cast_list'] = [];
     foreach (($credits['cast'] ?? []) as $c) {
-        $cast[] = $c['name'] ?? '';
+        if (empty($c['name'])) continue;
+        $cast[] = $c['name'];
+        if (count($item['cast_list']) < 12) {
+            $item['cast_list'][] = [
+                'name'      => $c['name'],
+                'character' => (string)($c['character'] ?? ''),
+                'photo'     => !empty($c['profile_path']) ? TMDB_IMAGE_BASE . $c['profile_path'] : '',
+            ];
+        }
     }
     $item['studio'] = implode(', ', array_slice($creators, 0, 3));
     $item['actors'] = implode(', ', array_slice($cast, 0, 5));

@@ -153,8 +153,15 @@ if ($is_api) {
 
 // ─── Metadata / stats ──────────────────────────────────────────────────
 $relations = $recommendations = $external_links = [];
+$season_chain = [];
+$kp_season = 0;
+$kp_ep_offset = 0;
 $banner_url = '';
 $next_airing = null;
+$title_logo = $title_logo ?? null;
+$cast_list  = $cast_list ?? [];
+$mal_id     = $mal_id ?? null;
+$season_count = 0;
 
 if ($is_api && $anime_data) {
     $episode_runtime_seconds = progress_item_runtime_seconds($anime_data);
@@ -172,7 +179,6 @@ if ($is_api && $anime_data) {
     $language       = 'JP';
     $country        = 'Japan';
     $episodes_total = (int)($anime_data['episodes'] ?: $anime_data['aired_episodes'] ?: 0);
-    $season_count = 0;
     if ($is_tmdb_tv && !empty($episodes_list)) {
         $season_numbers = array_unique(array_map(fn($e) => (int)($e['season'] ?? 1), $episodes_list));
         $season_count = count($season_numbers);
@@ -185,6 +191,133 @@ if ($is_api && $anime_data) {
     $next_airing    = $anime_data['next_airing'] ?? null;
     $anime_status   = $anime_data['status'] ?? '';
     $anime_season   = $anime_data['season'] ?? '';
+    $title_logo     = $anime_data['title_logo'] ?? null;
+    $cast_list      = $anime_data['cast_list'] ?? [];
+
+    // AniList franchises: Season 1..N switcher via SEQUEL/PREQUEL chain.
+    if ($provider === 'anilist' && function_exists('anilist_season_chain')) {
+        $season_chain = anilist_season_chain($anime_data, $relations);
+        if ($season_chain) {
+            $chainIds = [];
+            foreach ($season_chain as $sc) {
+                $chainIds[] = $sc['id'];
+                foreach (($sc['members'] ?? []) as $mem) {
+                    if (!empty($mem['id'])) $chainIds[] = $mem['id'];
+                }
+            }
+            $chainIds = array_values(array_unique($chainIds));
+            $relations = array_values(array_filter(
+                $relations,
+                fn($r) => !in_array($r['id'] ?? '', $chainIds, true)
+            ));
+        }
+    }
+
+    // Season number + episode offset for AniList S1E1-style labels (split-cour safe).
+    $kp_season    = ($provider === 'anilist') ? 1 : 0;
+    $kp_ep_offset = 0;
+    foreach ($season_chain as $sc) {
+        if (empty($sc['active'])) continue;
+        $kp_season = (int)($sc['season_num'] ?? 1);
+        foreach (($sc['members'] ?? []) as $mem) {
+            if (!empty($mem['current'])) break;
+            $kp_ep_offset += (int)($mem['episodes'] ?? 0);
+        }
+        break;
+    }
+
+    // Full-season episode list for multi-member groups (split-cours).
+    // Chip shows the summed count, so the list must too: S2E1..S2E25 with
+    // each row tagged by source entry (src) + season display number (dn).
+    if ($provider === 'anilist' && $season_chain) {
+        foreach ($season_chain as $sc) {
+            if (empty($sc['active'])) continue;
+            $members = $sc['members'] ?? [];
+            if (count($members) > 1) {
+                $merged = [];
+                $dn     = 0;
+                foreach ($members as $mem) {
+                    $memKey   = (string)($mem['id'] ?? '');
+                    $isCur    = !empty($mem['current']);
+                    $memCount = (int)($mem['episodes'] ?? 0);
+                    $srcEps   = [];
+
+                    if ($isCur) {
+                        $srcEps = $episodes_list;
+                    } else {
+                        $mid = (int)($mem['anilist_id'] ?? 0);
+                        if ($mid > 0 && function_exists('anilist_media_detail')) {
+                            $detail = anilist_media_detail(['id' => $mid]);
+                            if (!empty($detail['episodes_list']) && is_array($detail['episodes_list'])) {
+                                $srcEps = $detail['episodes_list'];
+                            }
+                        }
+                    }
+                    if (!$srcEps && $memCount > 0) {
+                        for ($i = 1; $i <= min($memCount, 2000); $i++) {
+                            $srcEps[] = ['number' => $i, 'title' => '', 'image' => '', 'aired' => ''];
+                        }
+                    }
+
+                    $seen = 0;
+                    foreach ($srcEps as $ep) {
+                        $seen++;
+                        $dn++;
+                        $merged[] = [
+                            'number' => (int)($ep['number'] ?? $seen),
+                            'title'  => (string)($ep['title'] ?? ''),
+                            'image'  => (string)($ep['image'] ?? ''),
+                            'aired'  => (string)($ep['aired'] ?? ''),
+                            'dn'     => $dn,
+                            'src'    => $memKey,
+                        ];
+                    }
+                    if ($memCount > $seen) {
+                        for ($i = $seen + 1; $i <= $memCount; $i++) {
+                            $dn++;
+                            $merged[] = [
+                                'number' => $i,
+                                'title'  => '',
+                                'image'  => '',
+                                'aired'  => '',
+                                'dn'     => $dn,
+                                'src'    => $memKey,
+                            ];
+                        }
+                    }
+                }
+                if ($merged) {
+                    $episodes_list  = $merged;
+                    $episodes_total = $dn;
+                    $kp_ep_offset   = 0; // dn already carries the season offset
+                }
+            }
+            // Keep chip / header / KP.total in sync with the actual list.
+            if (!empty($episodes_list) && !$is_tmdb_movie) {
+                $episodes_total = max($episodes_total, count($episodes_list));
+            }
+            break;
+        }
+    } elseif (!empty($episodes_list) && !$is_tmdb_movie) {
+        $episodes_total = max($episodes_total, count($episodes_list));
+    }
+
+    // Lock unreleased episodes (airing titles only: episodes exist but not all aired).
+    $kp_aired_eps = (int)($anime_data['aired_episodes'] ?? 0);
+    if (!$is_tmdb_movie && !empty($episodes_list) && $kp_aired_eps > 0 && $kp_aired_eps < $episodes_total) {
+        $kp_next_air_ts = !empty($next_airing['airingAt']) ? (int)$next_airing['airingAt'] : 0;
+        $kp_next_air_ep = !empty($next_airing['episode']) ? (int)$next_airing['episode'] : ($kp_aired_eps + 1);
+        foreach ($episodes_list as &$epLock) {
+            $epNo = (int)($epLock['number'] ?? 0);
+            if ($epNo > $kp_aired_eps) {
+                $epLock['lk'] = 1;
+                if ($kp_next_air_ts > 0) {
+                    $epLock['a'] = $kp_next_air_ts + (($epNo - $kp_next_air_ep) * 604800);
+                }
+            }
+        }
+        unset($epLock);
+    }
 } else {
     $anime_status = '';
     $anime_season = '';
@@ -206,9 +339,20 @@ if ($is_api && $anime_data) {
     $country        = $legacy_data['country'] ?? 'N/A';
     $episodes_total = 0;
     $anilist_id     = null;
+    $title_logo     = null;
+    $cast_list      = [];
 }
 
 $plot = is_string($plot) ? strip_tags($plot) : '';
+
+// Title logo fallback for non-TMDB sources (same artwork path the slider uses)
+if (empty($title_logo) && $is_api && !empty($mal_id) && function_exists('anime_title_logo')) {
+    $title_logo = anime_title_logo([
+        'mal_id' => $mal_id,
+        'title'  => $display_title ?? '',
+        'year'   => (int)substr((string)($release_date ?? ''), 0, 4),
+    ]);
+}
 
 if ($is_api) {
     $total_views = 0;
@@ -391,24 +535,22 @@ include_once './includes/header.php';
             .tmdb-season-tabs {
                 display: flex;
                 gap: 8px;
-                overflow-x: auto;
+                flex-wrap: wrap;
                 padding-bottom: 4px;
-                scrollbar-width: none;
             }
-            .tmdb-season-tabs::-webkit-scrollbar { display: none; }
             .tmdb-season-tab {
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                gap: 2px;
-                padding: 10px 18px;
-                border-radius: 20px;
+                display: inline-flex;
+                flex-direction: row;
+                align-items: baseline;
+                gap: 6px;
+                padding: 7px 14px;
+                border-radius: 8px;
                 border: 1px solid rgba(255,255,255,.12);
                 background: rgba(255,255,255,.06);
                 color: #ccc;
                 cursor: pointer;
                 transition: all .2s;
-                font-size: 13px;
+                font-size: 12px;
                 line-height: 1.2;
                 white-space: nowrap;
                 flex-shrink: 0;
@@ -425,12 +567,16 @@ include_once './includes/header.php';
                 box-shadow: 0 0 14px rgba(255,46,99,.3);
             }
             .tmdb-season-tab strong {
-                font-size: 13px;
+                font-size: 12px;
                 font-weight: 600;
             }
             .tmdb-season-ep-count {
                 font-size: 11px;
                 opacity: .6;
+            }
+            a.tmdb-season-tab {
+                text-decoration: none;
+                color: inherit;
             }
 
             .kp-movie-info-card {
@@ -600,29 +746,43 @@ include_once './includes/header.php';
             .watch-related-section .show-item-con .movie-card:hover .kp-card-hover-overlay {
                 opacity: 1;
             }
-            .watch-related-section .anime-con.show-container {
-                background: rgba(255,255,255,.02);
-                border: 1px solid rgba(255,255,255,.05);
-                border-radius: 12px;
-                padding: 14px;
-            }
             .watch-related-section .anime-con .head-show {
                 display: none;
             }
 
-            /* Side-by-side Related + Recommendations */
+            /* Related / Recommendations — stacked vertically, same width as synopsis card */
             .watch-related-row {
                 display: flex;
-                gap: 16px;
-                margin-bottom: 28px;
+                flex-direction: column;
+                gap: 8px;
+                width: calc(100% - 48px);
+                max-width: none;
+                margin: 0 24px 28px;
+                align-self: stretch;
+                box-sizing: border-box;
             }
             .watch-related-row .watch-related-section {
-                flex: 1 1 0;
+                flex: 1 1 auto;
+                width: 100%;
                 min-width: 0;
             }
-            /* When only one section exists, it takes full width */
-            .watch-related-row .watch-related-section:only-child {
-                flex: 1 1 100%;
+            .watch-related-section .anime-con.show-container {
+                background: transparent;
+                border: none;
+                border-radius: 0;
+                padding: 0;
+                box-shadow: none;
+            }
+            .watch-related-section .show-item-con {
+                width: 100%;
+            }
+            .watch-related-section .show-item-con .movie-card,
+            .watch-related-section .show-item-con .watch-item {
+                width: 100%;
+                max-width: none;
+            }
+            .watch-related-section .show-item-con .thumb-wrapper {
+                width: 100%;
             }
         </style>
         <?php endif; ?>
@@ -637,6 +797,30 @@ include_once './includes/header.php';
 
 
         <?php if ($is_api): ?>
+            <?php if (!empty($season_chain)): ?>
+            <!-- AniList franchise seasons (SEQUEL/PREQUEL) → full page nav -->
+            <div class="tmdb-seasons-wrap" id="anilist-seasons-wrap">
+                <h4>Seasons</h4>
+                <div class="tmdb-season-tabs" id="anilist-season-tabs">
+                    <?php foreach ($season_chain as $s): ?>
+                    <a class="tmdb-season-tab<?= !empty($s['active']) ? ' active' : '' ?>"
+                       href="<?= kp_e($s['url']) ?>"
+                       title="<?= kp_e($s['title']) ?>"
+                       <?= !empty($s['active']) ? 'aria-current="page"' : '' ?>>
+                        <strong><?= kp_e($s['label']) ?></strong>
+                        <span class="tmdb-season-ep-count">
+                            <?php if (!empty($s['episodes'])): ?>
+                                <?= (int)$s['episodes'] ?> eps
+                            <?php elseif (!empty($s['year'])): ?>
+                                <?= kp_e((string)$s['year']) ?>
+                            <?php endif; ?>
+                        </span>
+                    </a>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+            <?php endif; ?>
+
             <?php if ($is_tmdb_tv): ?>
             <div class="tmdb-seasons-wrap" id="tmdb-seasons-wrap">
                 <h4>Seasons<?= $episodes_total ? ' (' . (int)$episodes_total . ')' : '' ?></h4>
@@ -805,18 +989,33 @@ include_once './includes/header.php';
         </div>
     </div>
 
-    <div class="movie-details">
-        <?php if (!empty($banner_url)): ?>
-            <div class="kp-banner">
+    <div class="movie-details kp-detail-hero">
+        <div class="kp-detail-bg" aria-hidden="true">
+            <?php if (!empty($banner_url)): ?>
                 <img src="<?= kp_e($banner_url) ?>" alt="" loading="lazy">
-            </div>
-        <?php endif; ?>
-
-        <div class="movie-title">
-            <i class="fas fa-film"></i>
-            <span><?= kp_e($display_title) ?></span>
-            <span class="kp-badge"><?= kp_e($provider === 'legacy' ? 'local' : $provider) ?></span>
+            <?php elseif (!empty($poster_url)): ?>
+                <img src="<?= kp_e($poster_url) ?>" alt="" loading="lazy">
+            <?php endif; ?>
+            <div class="kp-detail-bg-shade"></div>
         </div>
+
+        <div class="kp-detail-head">
+            <?php if (!empty($title_logo)): ?>
+                <img class="kp-detail-logo" src="<?= kp_e($title_logo) ?>" alt="<?= kp_e($display_title) ?>" decoding="async">
+                <h2 class="kp-detail-title kp-sr-only"><?= kp_e($display_title) ?></h2>
+            <?php else: ?>
+                <h2 class="kp-detail-title"><?= kp_e($display_title) ?></h2>
+            <?php endif; ?>
+            <div class="kp-detail-badges">
+                <span class="kp-source-badge kp-source-<?= kp_e($provider === 'legacy' ? 'local' : $provider) ?>">
+                    <i class="fas fa-database"></i> <?= kp_e(ucfirst($provider === 'legacy' ? 'local' : $provider)) ?>
+                </span>
+                <?php if ($rating && $rating !== 'N/A'): ?>
+                <span class="kp-detail-rating"><i class="fas fa-star"></i> <?= kp_e(is_numeric($rating) ? number_format((float)$rating, 1) : $rating) ?></span>
+                <?php endif; ?>
+            </div>
+        </div>
+
         <div class="watch-desc-card">
             <h4><i class="fas fa-book-open"></i> Synopsis</h4>
             <div class="desc-text">
@@ -842,40 +1041,67 @@ include_once './includes/header.php';
             <?php endif; ?>
         </div>
 
-        <?php if (!$is_tmdb_movie && !$is_tmdb_tv): ?>
-        <ul class="kp-meta-grid">
-            <li><i class="fas fa-star"></i><strong>Rating:</strong><span class="kp-val"><?= kp_e($rating) ?></span></li>
-            <li><i class="fas fa-theater-masks"></i><strong>Genres:</strong><span class="kp-val"><?= kp_e($genre) ?></span></li>
-            <li><i class="fas fa-calendar-alt"></i><strong>Released:</strong><span class="kp-val"><?= kp_e($release_date) ?></span></li>
-            <li><i class="fas fa-clock"></i><strong>Duration:</strong><span class="kp-val"><?= kp_e($runtime) ?></span></li>
-            <li><i class="fas fa-video"></i><strong>Studio:</strong><span class="kp-val"><?= kp_e($director) ?></span></li>
-            <li><i class="fas fa-language"></i><strong>Language:</strong><span class="kp-val"><?= kp_e($language) ?></span></li>
-            <li><i class="fas fa-globe-asia"></i><strong>Country:</strong><span class="kp-val"><?= kp_e($country) ?></span></li>
-            <li><i class="fas fa-database"></i><strong>Source:</strong><span class="kp-val"><?= kp_e(ucfirst($provider)) ?></span></li>
-            <?php if (!empty($anilist_id)): ?>
-                <li><i class="fas fa-link"></i><strong>AniList:</strong>
-                    <a class="kp-val" href="https://anilist.co/anime/<?= (int)$anilist_id ?>" target="_blank" rel="noopener" style="color:#ff2e63; text-decoration:none;">#<?= (int)$anilist_id ?></a>
-                </li>
-            <?php endif; ?>
-            <?php if (!empty($mal_id)): ?>
-                <li><i class="fas fa-link"></i><strong>MAL:</strong>
-                    <a class="kp-val" href="https://myanimelist.net/anime/<?= (int)$mal_id ?>" target="_blank" rel="noopener" style="color:#ff2e63; text-decoration:none;">#<?= (int)$mal_id ?></a>
-                </li>
-            <?php endif; ?>
-            <?php if ($next_airing && !empty($next_airing['episode'])): ?>
-                <li><i class="fas fa-tower-broadcast"></i><strong>Next EP:</strong>
-                    <span class="kp-val"><?= (int)$next_airing['episode'] ?><?= !empty($next_airing['airingAt']) ? ' · ' . kp_e(date('D, d M', (int)$next_airing['airingAt'])) : '' ?></span>
-                </li>
-            <?php endif; ?>
-        </ul>
+        <?php if ($is_api): ?>
+        <div class="kp-meta-panel">
+            <div class="kp-meta-head"><i class="fas fa-circle-info"></i> Details</div>
+            <ul class="kp-meta-grid">
+                <li><i class="fas fa-star"></i><strong>Rating:</strong><span class="kp-val"><?= kp_e($rating) ?></span></li>
+                <li><i class="fas fa-theater-masks"></i><strong>Genres:</strong><span class="kp-val"><?= kp_e($genre) ?></span></li>
+                <li><i class="fas fa-calendar-alt"></i><strong>Released:</strong><span class="kp-val"><?= kp_e($release_date) ?></span></li>
+                <li><i class="fas fa-clock"></i><strong>Duration:</strong><span class="kp-val"><?= kp_e($runtime) ?></span></li>
+                <li><i class="fas fa-video"></i><strong>Studio:</strong><span class="kp-val"><?= kp_e($director) ?></span></li>
+                <li><i class="fas fa-language"></i><strong>Language:</strong><span class="kp-val"><?= kp_e($language) ?></span></li>
+                <li><i class="fas fa-globe-asia"></i><strong>Country:</strong><span class="kp-val"><?= kp_e($country) ?></span></li>
+                <li><i class="fas fa-database"></i><strong>Source:</strong><span class="kp-val"><?= kp_e(ucfirst($provider)) ?></span></li>
+                <?php if (!empty($anilist_id)): ?>
+                    <li><i class="fas fa-link"></i><strong>AniList:</strong>
+                        <a class="kp-val" href="https://anilist.co/anime/<?= (int)$anilist_id ?>" target="_blank" rel="noopener" style="color:#ff2e63; text-decoration:none;">#<?= (int)$anilist_id ?></a>
+                    </li>
+                <?php endif; ?>
+                <?php if (!empty($mal_id)): ?>
+                    <li><i class="fas fa-link"></i><strong>MAL:</strong>
+                        <a class="kp-val" href="https://myanimelist.net/anime/<?= (int)$mal_id ?>" target="_blank" rel="noopener" style="color:#ff2e63; text-decoration:none;">#<?= (int)$mal_id ?></a>
+                    </li>
+                <?php endif; ?>
+                <?php if ($next_airing && !empty($next_airing['episode'])): ?>
+                    <li><i class="fas fa-tower-broadcast"></i><strong>Next EP:</strong>
+                        <span class="kp-val"><?= (int)$next_airing['episode'] ?><?= !empty($next_airing['airingAt']) ? ' · ' . kp_e(date('D, d M', (int)$next_airing['airingAt'])) : '' ?></span>
+                    </li>
+                <?php endif; ?>
+            </ul>
+        </div>
+        <?php endif; ?>
+
+        <?php if (!empty($cast_list)): ?>
+        <div class="kp-cast-strip">
+            <div class="kp-cast-head"><i class="fas fa-theater-masks"></i> Cast</div>
+            <div class="kp-cast-row">
+                <?php foreach (array_slice($cast_list, 0, 12) as $c): ?>
+                <div class="kp-cast-card">
+                    <div class="kp-cast-photo">
+                        <?php if (!empty($c['photo'])): ?>
+                            <img src="<?= kp_e($c['photo']) ?>" alt="<?= kp_e($c['name']) ?>" loading="lazy">
+                        <?php else: ?>
+                            <span class="kp-cast-initial"><?= kp_e(mb_strtoupper(mb_substr($c['name'], 0, 1))) ?></span>
+                        <?php endif; ?>
+                    </div>
+                    <span class="kp-cast-name"><?= kp_e($c['name']) ?></span>
+                    <?php if (!empty($c['character'])): ?>
+                    <span class="kp-cast-char"><?= kp_e($c['character']) ?></span>
+                    <?php endif; ?>
+                </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
         <?php endif; ?>
 
         <?php if (!empty($external_links)): ?>
-            <div style="margin-top:16px;">
-                <strong style="color:#ddd;"><i class="fas fa-up-right-from-square"></i> Official / Streaming</strong>
+            <div class="kp-ext-links">
+                <div class="kp-ext-head"><i class="fas fa-up-right-from-square"></i> Official / Streaming</div>
                 <div class="kp-links">
                     <?php foreach (array_slice($external_links, 0, 10) as $link): ?>
                         <a href="<?= kp_e($link['url']) ?>" target="_blank" rel="noopener">
+                            <i class="fas fa-arrow-up-right-from-square"></i>
                             <?= kp_e($link['site'] ?: 'Link') ?>
                         </a>
                     <?php endforeach; ?>
@@ -931,11 +1157,22 @@ include_once './includes/header.php';
             tmdbId: <?= $is_tmdb ? (int)($parsed['id'] ?? 0) : 'null' ?>,
             serverEmbedUrl: <?= json_encode($video_url ?? null, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) ?>,
             embedServers: <?= json_encode($embedServers ?? [], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) ?>,
+            embedTemplates: <?= json_encode(array_map(fn($p) => ['label' => $p['label'] ?? '', 'url' => $p['url'] ?? ''], $GLOBALS['TV_EMBED_PROVIDERS'] ?? []), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) ?>,
             season: <?= $season_id ? (int)$season_id : '1' ?>,
             currentSeason: <?= $season_id ? (int)$season_id : '1' ?>,
+            kpSeason: <?= (int)$kp_season ?>,
+            kpEpOffset: <?= (int)$kp_ep_offset ?>,
             resume: <?= json_encode($resume ?: null, JSON_UNESCAPED_UNICODE) ?>,
             episodes: <?= json_encode(
-                array_map(fn($e) => ['n' => (int)$e['number'], 't' => (string)($e['title'] ?? ''), 's' => (int)($e['season'] ?? 1)], $episodes_list),
+                array_map(fn($e) => [
+                    'n'   => (int)$e['number'],
+                    't'   => (string)($e['title'] ?? ''),
+                    's'   => (int)($e['season'] ?? 1),
+                    'dn'  => isset($e['dn']) ? (int)$e['dn'] : null,
+                    'src' => (string)($e['src'] ?? ''),
+                    'a'   => isset($e['a']) && $e['a'] ? (int)$e['a'] : null,
+                    'lk'  => !empty($e['lk']),
+                ], $episodes_list),
                 JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP
             ) ?>
         };
@@ -998,7 +1235,7 @@ include_once './includes/header.php';
         // to prevent counting idle time as watch time.
         let lastUserActivity = Date.now();
         const IDLE_TIMEOUT_MS = 30000; // 30s of no activity = idle
-        const MIN_WATCH_SESSION_MS = 10000; // 10s minimum before counting
+        const MIN_WATCH_SESSION_MS = 5000; // 5s minimum before counting
         let sessionStartTime = 0;
 
         function markUserActive() {
@@ -1238,18 +1475,20 @@ include_once './includes/header.php';
         let nextCancelled = false;
 
         function showNextEpisode() {
-            var nextEp = currentEp + 1;
+            var nextEp = currentEp;
             var nextSeason = KP.currentSeason;
+            var nextMeta = null;
+            var nextUrl = null;
+            var title = '';
 
-            // For TMDB TV, check if next episode exists in current season first
             if (KP.isTmdbTv) {
+                nextEp = currentEp + 1;
                 var currentSeasonEps = (KP.episodes || []).filter(function (e) {
                     return (e.s || 1) === nextSeason;
                 });
                 var maxEpInSeason = currentSeasonEps.length ? Math.max.apply(null, currentSeasonEps.map(function (e) { return e.n; })) : 0;
 
                 if (nextEp > maxEpInSeason) {
-                    // Move to next season
                     var allSeasons = [];
                     var seen = {};
                     (KP.episodes || []).forEach(function (e) {
@@ -1262,18 +1501,55 @@ include_once './includes/header.php';
                         nextSeason = allSeasons[idx + 1];
                         nextEp = 1;
                     } else {
-                        return; // No more seasons
+                        return;
                     }
                 }
+
+                nextMeta = (KP.episodes || []).find(function (e) {
+                    return e.n === nextEp && (e.s || 1) === nextSeason;
+                });
+                title = nextMeta && nextMeta.t ? nextMeta.t : ('S' + nextSeason + ' E' + nextEp);
+                var tmdbUrl = new URL(window.location.href);
+                tmdbUrl.searchParams.set('ep', nextEp);
+                tmdbUrl.searchParams.set('season', nextSeason);
+                KP.currentSeason = nextSeason;
+                tmdbUrl.searchParams.delete('lang');
+                nextUrl = tmdbUrl.toString();
+            } else if ((KP.episodes || []).some(function (e) { return e.dn != null; })) {
+                // AniList full-season list: advance by display number (dn), not local n.
+                var curDn = null;
+                for (var i = 0; i < KP.episodes.length; i++) {
+                    var e = KP.episodes[i];
+                    var srcOk = !e.src || e.src === KP.id;
+                    if (srcOk && e.n === currentEp) { curDn = e.dn; break; }
+                }
+                if (curDn == null) curDn = currentEp + (KP.kpEpOffset || 0);
+                nextMeta = (KP.episodes || []).find(function (x) { return x.dn === curDn + 1; });
+                if (!nextMeta) return;
+                title = nextMeta.t ? nextMeta.t : ('S' + KP.kpSeason + 'E' + nextMeta.dn);
+                if (nextMeta.src && nextMeta.src !== KP.id) {
+                    nextUrl = './watch.php?id=' + encodeURIComponent(nextMeta.src) + '&ep=' + nextMeta.n;
+                } else {
+                    var aniUrl = new URL(window.location.href);
+                    aniUrl.searchParams.set('ep', nextMeta.n);
+                    aniUrl.searchParams.delete('lang');
+                    nextUrl = aniUrl.toString();
+                }
+            } else {
+                nextEp = currentEp + 1;
+                var hasMore = !KP.total || nextEp <= KP.total;
+                if (!hasMore) return;
+                nextMeta = (KP.episodes || []).find(function (e2) {
+                    return e2.n === nextEp && (e2.s || 1) === nextSeason;
+                });
+                title = nextMeta && nextMeta.t ? nextMeta.t : ('S' + nextSeason + ' E' + nextEp);
+                var legacyUrl = new URL(window.location.href);
+                legacyUrl.searchParams.set('ep', nextEp);
+                legacyUrl.searchParams.delete('lang');
+                nextUrl = legacyUrl.toString();
             }
 
-            var hasMore = !KP.total || nextEp <= KP.total;
-            if (!hasMore || !nextOverlay) return;
-
-            var meta = (KP.episodes || []).find(function (e) {
-                return e.n === nextEp && (e.s || 1) === nextSeason;
-            });
-            var title = meta && meta.t ? meta.t : ('S' + nextSeason + ' E' + nextEp);
+            if (!nextOverlay || !nextUrl) return;
 
             if (nextTitle) nextTitle.textContent = title;
 
@@ -1282,17 +1558,7 @@ include_once './includes/header.php';
 
             var remaining = 5;
             if (nextCount) nextCount.textContent = remaining;
-            if (nextBar) nextBar.style.transition = 'none';
-
-            // Build URL for next episode
-            var url = new URL(window.location.href);
-            url.searchParams.set('ep', nextEp);
-            if (KP.isTmdbTv) {
-                url.searchParams.set('season', nextSeason);
-                KP.currentSeason = nextSeason;
-            }
-            url.searchParams.delete('lang');
-            var nextUrl = url.toString();
+            nextBar.style.transition = 'none';
 
             nextPlayBtn.onclick = function () {
                 clearInterval(nextTimer);
@@ -1588,6 +1854,29 @@ include_once './includes/header.php';
             embedFrame.src = url;
         }
 
+        // ─── Client-side TV embed rebuild (avoids stale S1E1 fallback) ──
+        function buildTvServers(season, ep) {
+            season = parseInt(season, 10) || 1;
+            ep = parseInt(ep, 10) || 1;
+            var out = [];
+            var templates = KP.embedTemplates || {};
+            Object.keys(templates).forEach(function (key) {
+                var p = templates[key];
+                if (!p || !p.url) return;
+                var url = String(p.url)
+                    .replace(/\{tmdb\}/g, KP.tmdbId)
+                    .replace(/\{season\}/g, season)
+                    .replace(/\{episode\}/g, ep);
+                out.push({ key: key, label: p.label || key, mode: 'embed', url: url });
+            });
+            return out;
+        }
+
+        function clearStaleEmbedState() {
+            KP.serverEmbedUrl = null;
+            KP.embedServers = [];
+        }
+
         // ─── Server chips ───────────────────────────────────────────
         function renderServers(servers) {
             lastServers = Array.isArray(servers) ? servers : [];
@@ -1717,14 +2006,22 @@ include_once './includes/header.php';
         }
 
         function updateGate() {
-            const meta = (KP.episodes || []).find(function (e) { return e.n === currentEp; });
+            const meta = (KP.episodes || []).find(function (e) {
+                const srcOk = !e.src || e.src === KP.id;
+                return srcOk && e.n === currentEp;
+            });
             const epTitle = meta && meta.t ? meta.t : '';
+            const showNum = (meta && meta.dn != null)
+                ? meta.dn
+                : (currentEp + (KP.kpEpOffset || 0));
 
             if (gateEpEl) {
                 if (KP.isTmdbMovie) {
                     gateEpEl.textContent = 'Watch Movie';
                 } else if (KP.isTmdbTv) {
                     gateEpEl.textContent = 'Season ' + KP.currentSeason + ' · Episode ' + currentEp + (KP.total ? ' of ' + KP.total : '');
+                } else if (KP.kpSeason > 0 && meta && meta.dn != null) {
+                    gateEpEl.textContent = 'Episode ' + showNum + (KP.total ? ' of ' + KP.total : '');
                 } else {
                     gateEpEl.textContent = 'Episode ' + currentEp + (KP.total ? ' of ' + KP.total : '');
                 }
@@ -1744,6 +2041,10 @@ include_once './includes/header.php';
             if (gatePlayLabel) {
                 if (KP.isTmdbMovie) {
                     gatePlayLabel.textContent = 'Play Movie';
+                } else if (KP.kpSeason > 0 && meta && meta.dn != null) {
+                    gatePlayLabel.textContent = at > 0
+                        ? 'Resume from ' + formatClock(at)
+                        : 'Play Episode ' + showNum;
                 } else {
                     gatePlayLabel.textContent = at > 0
                         ? 'Resume from ' + formatClock(at)
@@ -1840,10 +2141,11 @@ include_once './includes/header.php';
                     .then(function(data) {
                         payload = data;
                         if (!data || !data.ok || !data.url) {
-                            // Fallback: use PHP-resolved embed URL
-                            if (KP.serverEmbedUrl) {
-                                payload = { ok: true, mode: 'embed', url: KP.serverEmbedUrl, servers: KP.embedServers || [] };
-                                renderServers(KP.embedServers || []);
+                            // Fallback: rebuild embed URLs for the requested season/episode
+                            var rebuiltTv = buildTvServers(KP.currentSeason || 1, ep);
+                            if (rebuiltTv.length) {
+                                payload = { ok: true, mode: 'embed', url: rebuiltTv[0].url, servers: rebuiltTv };
+                                renderServers(rebuiltTv);
                                 if (autoplay) playPayload();
                                 else { setState('gate'); updateGate(); }
                                 return;
@@ -1858,10 +2160,11 @@ include_once './includes/header.php';
                     })
                     .catch(function(err) {
                         console.error('resolve error', err);
-                        // Fallback: use PHP-resolved embed URL
-                        if (KP.serverEmbedUrl) {
-                            payload = { ok: true, mode: 'embed', url: KP.serverEmbedUrl, servers: KP.embedServers || [] };
-                            renderServers(KP.embedServers || []);
+                        // Fallback: rebuild embed URLs for the requested season/episode
+                        var rebuiltTvCatch = buildTvServers(KP.currentSeason || 1, ep);
+                        if (rebuiltTvCatch.length) {
+                            payload = { ok: true, mode: 'embed', url: rebuiltTvCatch[0].url, servers: rebuiltTvCatch };
+                            renderServers(rebuiltTvCatch);
                             if (autoplay) playPayload();
                             else { setState('gate'); updateGate(); }
                             return;
@@ -1951,18 +2254,28 @@ include_once './includes/header.php';
         }
 
         // ─── Episode list (built here so long series stay a small payload) ──
-        function episodeElement(number, title, season) {
+        function episodeElement(ep) {
+            const number = ep.n;
+            const title  = ep.t;
+            const season = ep.s;
+            const dn     = (ep.dn != null) ? ep.dn : (number + (KP.kpEpOffset || 0));
+            const src    = ep.src || '';
+            const isCur  = !src || src === KP.id;
+
             const el = document.createElement('div');
-            const active = (number === currentEp);
+            const active = isCur && (number === currentEp);
             el.className = 'episode kp-ep' + (active ? ' active-play' : '');
-            el.dataset.episode = number;
-            el.dataset.search = ('ep ' + number + ' ' + (title || '') + ' s' + (season || 1) + ' e' + number).toLowerCase();
+            // Progress keys are local to the current entry — tag foreign rows so they never match.
+            el.dataset.episode = isCur ? number : (src + ':' + number);
+            el.dataset.search = ('s' + (KP.kpSeason || season || 1) + 'e' + dn + ' ep ' + number + ' ' + (title || '')).toLowerCase();
 
             const label = document.createElement('span');
             label.className = 'kp-ep-main';
             const num = document.createElement('strong');
             if (KP.isTmdbTv) {
                 num.textContent = 'S' + (season || KP.currentSeason || 1) + ' E' + number;
+            } else if (KP.kpSeason > 0) {
+                num.textContent = 'S' + KP.kpSeason + 'E' + dn;
             } else {
                 num.textContent = 'EP' + String(number).padStart(3, '0');
             }
@@ -1973,6 +2286,8 @@ include_once './includes/header.php';
                 t.textContent = ' · ' + (title.length > 42 ? title.slice(0, 42) + '…' : title);
                 label.appendChild(t);
             }
+            const isLocked = !!ep.lk;
+            if (isLocked) el.classList.add('kp-ep-locked');
             el.appendChild(label);
 
             const right = document.createElement('span');
@@ -1983,13 +2298,32 @@ include_once './includes/header.php';
             badge.style.display = 'none';
             right.appendChild(badge);
 
-            const icon = document.createElement('i');
-            icon.className = 'fas fa-play-circle';
-            right.appendChild(icon);
+            if (isLocked) {
+                const lockI = document.createElement('i');
+                lockI.className = 'fas fa-lock';
+                right.appendChild(lockI);
+                if (ep.a) {
+                    const air = document.createElement('span');
+                    air.className = 'kp-ep-air';
+                    air.textContent = new Date(ep.a * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                    right.appendChild(air);
+                }
+            } else {
+                const icon = document.createElement('i');
+                icon.className = 'fas fa-play-circle';
+                right.appendChild(icon);
+            }
             el.appendChild(right);
 
             el.style.setProperty('--kp-pct', '0%');
-            el.addEventListener('click', function () { selectEpisode(el, number); });
+            el.addEventListener('click', function () {
+                if (isLocked) return;
+                if (!isCur) {
+                    window.location.href = './watch.php?id=' + encodeURIComponent(src) + '&ep=' + number;
+                    return;
+                }
+                selectEpisode(el, number);
+            });
             return el;
         }
 
@@ -2050,7 +2384,7 @@ include_once './includes/header.php';
             }
 
             const frag = document.createDocumentFragment();
-            filtered.forEach(function (ep) { frag.appendChild(episodeElement(ep.n, ep.t, ep.s)); });
+            filtered.forEach(function (ep) { frag.appendChild(episodeElement(ep)); });
             container.appendChild(frag);
 
             Object.keys(resumeCache).forEach(function (ep) {
@@ -2058,7 +2392,10 @@ include_once './includes/header.php';
             });
 
             const active = container.querySelector('.episode.active-play');
-            if (active) active.scrollIntoView({ block: 'center' });
+            const scroller = active && active.closest('.episode-scroll');
+            if (active && scroller) {
+                scroller.scrollTop = active.offsetTop - scroller.clientHeight / 2 + active.offsetHeight / 2;
+            }
 
             loadAllProgress();
         }
@@ -2091,6 +2428,7 @@ include_once './includes/header.php';
                 btn.addEventListener('click', function () {
                     if (KP.currentSeason === sNum) return;
                     KP.currentSeason = sNum;
+                    clearStaleEmbedState();
 
                     document.querySelectorAll('.tmdb-season-tab').forEach(function (b) { b.classList.remove('active'); });
                     btn.classList.add('active');
@@ -2107,8 +2445,8 @@ include_once './includes/header.php';
 
                     currentEp = 1;
                     payload = null;
-            buildSeasonTabs();
-            buildEpisodeList();
+                    buildSeasonTabs();
+                    buildEpisodeList();
 
                     // Auto-play first episode of the season
                     var firstEp = document.querySelector('#anikuro-episode-container .episode');
@@ -2120,12 +2458,16 @@ include_once './includes/header.php';
 
         const epSearch = document.getElementById('ep-search');
         if (epSearch) {
+            let epSearchTimer = null;
             epSearch.addEventListener('input', function () {
-                const q = epSearch.value.trim().toLowerCase();
-                document.querySelectorAll('#anikuro-episode-container .episode').forEach(function (el) {
-                    const hay = (el.dataset.search || '') + ' ' + el.dataset.episode;
-                    el.style.display = (!q || hay.indexOf(q) !== -1) ? 'flex' : 'none';
-                });
+                clearTimeout(epSearchTimer);
+                epSearchTimer = setTimeout(function () {
+                    const q = epSearch.value.trim().toLowerCase();
+                    document.querySelectorAll('#anikuro-episode-container .episode').forEach(function (el) {
+                        const hay = (el.dataset.search || '') + ' ' + el.dataset.episode;
+                        el.style.display = (!q || hay.indexOf(q) !== -1) ? 'flex' : 'none';
+                    });
+                }, 120);
             });
         }
 
@@ -2272,6 +2614,7 @@ include_once './includes/header.php';
             const lc = document.getElementById('likeCount');
             if (lc) lc.textContent = formatNumber(parseInt(lc.textContent.replace(/,/g, ''), 10) || 0);
 
+            buildSeasonTabs();
             buildEpisodeList();
             renderLangToggle();
             initEpisodeNotes();

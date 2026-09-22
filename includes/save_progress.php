@@ -51,12 +51,7 @@ if ($last_position > 0) {
 
 $timeSaved = false;
 if ($watched > 0 || $duration > 0) {
-    // Server-side minimum threshold: don't count sessions under 10 seconds
-    // This prevents accidental clicks and bot traffic from inflating stats.
     $watched = max(0, (int)round($watched));
-    if ($watched > 0 && $watched < 10) {
-        $watched = 0; // Too short to count as meaningful watch time
-    }
     $timeSaved = watch_time_add($user_id, $anime_id, $episode, $watched, $duration);
 }
 

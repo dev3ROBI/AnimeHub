@@ -52,15 +52,15 @@
 
 .sidebar {
   flex: 1 1 28%;
+  min-width: 0;
+  max-width: 440px;
   background-color: #292929;
   border-radius: 6px;
   padding: 12px;
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  max-height: calc((100vw - 60px) * 0.5625 * 0.7);
-  /* Matches 16:9 video height */
+  justify-content: flex-start;
   overflow: hidden;
 }
 
@@ -95,8 +95,12 @@
 .episode-scroll {
   overflow-y: auto;
   flex: 1;
+  min-height: 180px;
+  max-height: 420px;
   margin-top: 12px;
   padding-right: 5px;
+  overscroll-behavior: contain;
+  contain: paint;
 }
 
 .sidebar h4 {
@@ -171,7 +175,7 @@
     font-size: 14px;
   }
 
-  /* Related sections stack on tablet */
+  /* Related sections stack */
   .watch-related-row {
     flex-direction: column;
   }
@@ -184,6 +188,236 @@
   border-radius: 6px;
   padding: 12px;
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+}
+
+/* --- Watch hero: blurred cover + title logo + source badge --- */
+.kp-detail-hero {
+  position: relative;
+  overflow: hidden;
+  padding: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.kp-detail-bg {
+  position: relative;
+  width: 100%;
+  height: 220px;
+  overflow: hidden;
+  border-radius: 6px 6px 0 0;
+  line-height: 0;
+}
+
+.kp-detail-bg img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 20%;
+  filter: blur(3px) brightness(0.65) saturate(1.15);
+  transform: scale(1.06);
+}
+
+.kp-detail-bg-shade {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgba(0, 0, 0, 0) 40%, rgba(41, 41, 41, 0.35) 100%),
+    linear-gradient(180deg, rgba(41, 41, 41, 0.1) 0%, rgba(41, 41, 41, 0.55) 50%, rgba(41, 41, 41, 0.92) 85%, #292929 100%);
+}
+
+.kp-detail-head {
+  position: relative;
+  z-index: 2;
+  margin-top: -86px;
+  padding: 0 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+}
+
+.kp-detail-logo {
+  max-width: min(560px, 94%);
+  max-height: 148px;
+  object-fit: contain;
+  object-position: center bottom;
+  margin: 0 auto;
+  filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.75));
+}
+
+.kp-detail-title {
+  font-size: 34px;
+  font-weight: 800;
+  color: #fff;
+  margin: 0;
+  text-align: center;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8);
+  line-height: 1.2;
+}
+
+.kp-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.kp-detail-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.kp-source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  color: #eee;
+}
+
+.kp-source-badge i { font-size: 10px; }
+
+.kp-source-tmdb { border-color: rgba(1, 210, 211, 0.45); color: #8ef0f1; }
+.kp-source-anilist { border-color: rgba(52, 123, 255, 0.5); color: #7eb0ff; }
+.kp-source-jikan { border-color: rgba(255, 76, 0, 0.5); color: #ff9a6b; }
+.kp-source-reanime { border-color: rgba(196, 79, 255, 0.5); color: #d9a0ff; }
+.kp-source-anikuro { border-color: rgba(255, 46, 99, 0.5); color: #ff7ea3; }
+.kp-source-local { border-color: rgba(120, 255, 160, 0.4); color: #9dffc2; }
+
+.kp-detail-rating {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffd166;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: rgba(255, 209, 102, 0.14);
+  border: 1px solid rgba(255, 209, 102, 0.35);
+  backdrop-filter: blur(6px);
+}
+
+.kp-detail-hero .watch-desc-card {
+  position: relative;
+  z-index: 2;
+  margin: 16px 12px 0;
+  background: rgba(20, 20, 20, 0.72);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+/* --- Cast strip --- */
+.kp-cast-strip {
+  position: relative;
+  z-index: 2;
+  margin: 14px 12px 12px;
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.kp-cast-head {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #ff2e63;
+  margin-bottom: 10px;
+}
+
+.kp-cast-head i { margin-right: 6px; }
+
+.kp-cast-row {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: #ff2e63 #1f1f1f;
+}
+
+.kp-cast-row::-webkit-scrollbar { height: 6px; }
+.kp-cast-row::-webkit-scrollbar-track { background: #1f1f1f; border-radius: 10px; }
+.kp-cast-row::-webkit-scrollbar-thumb { background: #ff2e63; border-radius: 10px; }
+
+.kp-cast-card {
+  flex: 0 0 auto;
+  width: 88px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+}
+
+.kp-cast-photo {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid rgba(255, 46, 99, 0.35);
+  background: linear-gradient(135deg, #3a3a3a, #222);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.kp-cast-card:hover .kp-cast-photo {
+  border-color: #ff2e63;
+  transform: translateY(-2px);
+}
+
+.kp-cast-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.kp-cast-initial {
+  font-size: 24px;
+  font-weight: 700;
+  color: #ff2e63;
+}
+
+.kp-cast-name {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #eee;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.kp-cast-char {
+  font-size: 10px;
+  color: #999;
+  line-height: 1.2;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .movie-title {
@@ -670,6 +904,8 @@
   cursor: pointer;
   font-size: 14px;
   transition: background 0.2s ease;
+  content-visibility: auto;
+  contain-intrinsic-size: 42px;
 }
 
 .kp-ep:hover {
@@ -725,6 +961,32 @@
   border-color: #ff2e63;
 }
 
+/* --- Meta panel (sits above cast) --- */
+.kp-meta-panel {
+  position: relative;
+  z-index: 2;
+  margin: 16px 12px 0;
+  padding: 14px;
+  border-radius: 12px;
+  background: rgba(20, 20, 20, 0.72);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.kp-meta-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #ff2e63;
+  margin-bottom: 12px;
+}
+
+.kp-meta-head i { font-size: 11px; }
+
 /* --- Meta as a chip grid instead of a long list --- */
 .kp-meta-grid {
   display: grid;
@@ -732,7 +994,7 @@
   gap: 8px;
   list-style: none;
   padding: 0;
-  margin: 0 0 16px;
+  margin: 0;
 }
 
 .kp-meta-grid li {
@@ -788,28 +1050,66 @@
   text-decoration: underline;
 }
 
-/* --- External link pills --- */
+/* --- External links --- */
+.kp-ext-links {
+  margin: 16px 12px 12px;
+  padding: 14px 14px 16px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.kp-ext-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: #eee;
+  margin-bottom: 12px;
+}
+
+.kp-ext-head i {
+  color: #ff2e63;
+  font-size: 12px;
+}
+
 .kp-links {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 8px;
 }
 
 .kp-links a {
-  padding: 5px 10px;
-  border-radius: 20px;
-  background: rgba(255,255,255,.06);
-  border: 1px solid rgba(255,255,255,.08);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   color: #ccc;
-  font-size: 11px;
-  font-weight: 500;
+  font-size: 12px;
+  font-weight: 600;
   text-decoration: none;
-  transition: all .2s;
+  transition: all 0.2s;
 }
+
+.kp-links a i {
+  font-size: 9px;
+  opacity: 0.6;
+}
+
 .kp-links a:hover {
-  background: rgba(255,46,99,.12);
-  border-color: rgba(255,46,99,.3);
+  background: rgba(255, 46, 99, 0.14);
+  border-color: rgba(255, 46, 99, 0.4);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.kp-links a:hover i {
+  opacity: 1;
   color: #ff2e63;
 }
 
@@ -1203,6 +1503,21 @@
   background: #fff;
 }
 
+/* Unreleased episode lock */
+.kp-ep.kp-ep-locked {
+  opacity: 0.55;
+  cursor: not-allowed;
+  background: #161616;
+}
+.kp-ep.kp-ep-locked .kp-ep-main strong { color: #8b8f95; }
+.kp-ep.kp-ep-locked .kp-ep-right i { color: #8b8f95; font-size: 12px; }
+.kp-ep-air {
+  font-size: 11px;
+  color: #6c757d;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 @media (max-width: 640px) {
   .kp-gate-poster { width: 74px; }
   .kp-gate-body { padding: 16px; gap: 12px; }
@@ -1270,18 +1585,19 @@
 
   /* TMDB season tabs */
   .tmdb-season-tabs {
-    flex-wrap: nowrap;
-    overflow-x: auto;
+    flex-wrap: wrap;
     gap: 6px;
     padding-bottom: 4px;
-    scrollbar-width: none;
   }
-  .tmdb-season-tabs::-webkit-scrollbar { display: none; }
   .tmdb-season-tab {
     flex-shrink: 0;
-    padding: 6px 12px;
-    font-size: 12px;
+    padding: 6px 10px;
+    font-size: 11px;
+    border-radius: 7px;
+    gap: 4px;
   }
+  .tmdb-season-tab strong { font-size: 11px; }
+  .tmdb-season-ep-count { font-size: 10px; }
 
   /* TMDB episode list */
   .kp-ep {
@@ -1298,6 +1614,17 @@
     font-size: 12px;
   }
 
+  /* Hero detail */
+  .kp-detail-bg { height: 150px; }
+  .kp-detail-head { margin-top: -64px; padding: 0 12px; gap: 8px; }
+  .kp-detail-logo { max-height: 86px; max-width: 92%; }
+  .kp-detail-title { font-size: 24px; }
+  .kp-detail-hero .watch-desc-card { margin: 12px 8px 0; padding: 12px; }
+  .kp-meta-panel { margin: 12px 8px 0; padding: 10px; }
+  .kp-cast-strip { margin: 12px 8px 8px; padding: 10px; }
+  .kp-cast-card { width: 76px; }
+  .kp-cast-photo { width: 62px; height: 62px; }
+
   /* Notes section */
   .kp-notes {
     padding: 10px;
@@ -1307,10 +1634,12 @@
     padding: 8px 10px;
   }
 
-  /* Related sections */
+  /* Related sections — vertical stack, match synopsis width on mobile */
   .watch-related-row {
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
+    width: calc(100% - 36px);
+    margin: 0 18px 24px;
   }
   .watch-related-section .show-item-con {
     grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));

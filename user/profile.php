@@ -168,6 +168,41 @@ $joinedTs = !empty($user['User_Join']) ? strtotime((string)$user['User_Join']) :
             <span class="kp-rank-pct"><?= $rankProgress ?>%</span>
         </div>
         <?php endif; ?>
+        <button type="button" class="kp-rank-viewall" id="kp-rank-viewall">
+            <i class="fa-solid fa-layer-group"></i> View all ranks
+        </button>
+    </div>
+
+    <!-- Rank ladder modal -->
+    <div class="kp-avatar-modal" id="kp-rank-modal" aria-hidden="true">
+        <div class="kp-avatar-dialog kp-rank-dialog" role="dialog" aria-labelledby="kp-rank-modal-title">
+            <div class="kp-avatar-head">
+                <h3 id="kp-rank-modal-title"><i class="fa-solid fa-layer-group"></i> Rank Ladder</h3>
+                <button type="button" class="kp-avatar-close" id="kp-rank-modal-close" aria-label="Close">
+                    <i class="fas fa-xmark"></i>
+                </button>
+            </div>
+            <div class="kp-rank-ladder">
+                <?php foreach (watch_time_rank_ladder($userID) as $tier): ?>
+                <div class="kp-rank-tier<?= $tier['current'] ? ' is-current' : ($tier['unlocked'] ? ' is-unlocked' : '') ?>">
+                    <div class="kp-rank-tier-badge" style="background:<?= htmlspecialchars($tier['color']) ?>20; border-color:<?= htmlspecialchars($tier['color']) ?>40;">
+                        <i class="<?= htmlspecialchars($tier['icon']) ?>" style="color:<?= htmlspecialchars($tier['color']) ?>;"></i>
+                    </div>
+                    <div class="kp-rank-tier-info">
+                        <span class="kp-rank-tier-title" style="color:<?= htmlspecialchars($tier['color']) ?>;"><?= htmlspecialchars($tier['title']) ?></span>
+                        <span class="kp-rank-tier-req"><?= progress_format_time($tier['min']) ?> watched</span>
+                    </div>
+                    <?php if ($tier['current']): ?>
+                        <span class="kp-rank-tier-tag is-current">Current</span>
+                    <?php elseif ($tier['unlocked']): ?>
+                        <span class="kp-rank-tier-tag is-unlocked"><i class="fas fa-check"></i></span>
+                    <?php else: ?>
+                        <span class="kp-rank-tier-tag is-locked"><i class="fas fa-lock"></i></span>
+                    <?php endif; ?>
+                </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
     </div>
 
     <div class="kp-panel">

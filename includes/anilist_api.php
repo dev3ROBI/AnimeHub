@@ -393,10 +393,27 @@ function anilist_media_detail(array $selector, $ttl = CACHE_TTL_INFO) {
             $fields
             streamingEpisodes { title thumbnail url site }
             externalLinks { site url type }
+            characters(sort: [ROLE, RELEVANCE, FAVOURITES_DESC], perPage: 15) {
+              edges { role node { name { full } image { large medium } } }
+            }
+            staff(sort: [RELEVANCE, FAVOURITES_DESC], perPage: 12) {
+              edges { role node { name { full } image { large medium } } }
+            }
             relations {
               edges {
                 relationType
-                node { id title { romaji english userPreferred } coverImage { large } format status episodes }
+                node {
+                  id
+                  isAdult
+                  title { romaji english userPreferred }
+                  coverImage { large }
+                  format
+                  status
+                  episodes
+                  season
+                  seasonYear
+                  startDate { year month day }
+                }
               }
             }
             recommendations(sort: RATING_DESC, perPage: 12) {
@@ -442,6 +459,20 @@ function anilist_media_detail(array $selector, $ttl = CACHE_TTL_INFO) {
         sort($list);
     }
     $item['episodes_list'] = $list;
+
+    $item['cast_list'] = [];
+    foreach (($media['characters']['edges'] ?? []) as $ce) {
+        $node = $ce['node'] ?? null;
+        if (empty($node['name']['full'])) continue;
+        if (count($item['cast_list']) >= 12) break;
+        $item['cast_list'][] = [
+            'name'      => (string)$node['name']['full'],
+            'character' => (string)($ce['role'] ?? ''),
+            'photo'     => !empty($node['image']['large'])
+                ? (string)$node['image']['large']
+                : (!empty($node['image']['medium']) ? (string)$node['image']['medium'] : ''),
+        ];
+    }
 
     $item['external_links'] = [];
     foreach (($media['externalLinks'] ?? []) as $l) {
@@ -538,4 +569,287 @@ function anilist_schedule($fromTs, $toTs, $tz = 'Asia/Dhaka') {
     unset($b);
 
     return array_values($buckets);
+}
+
+// ─── Franchise season chain (SEQUEL / PREQUEL) ────────────────────────
+
+/**
+ * Lightweight Media payload used only to walk SEQUEL/PREQUEL edges.
+ * Cached by anilist_query (CACHE_TTL_INFO).
+ */
+function anilist_sequel_prequel_media($anilistId) {
+    $id = (int)$anilistId;
+    if ($id <= 0) return null;
+
+    $data = anilist_query("
+        query (\$id: Int) {
+          Media(type: ANIME, id: \$id) {
+            id
+            title { romaji english userPreferred }
+            coverImage { large }
+            format
+            episodes
+            season
+            seasonYear
+            startDate { year month day }
+            isAdult
+            relations {
+              edges {
+                relationType
+                node {
+                  id
+                  title { romaji english userPreferred }
+                  coverImage { large }
+                  format
+                  episodes
+                  season
+                  seasonYear
+                  startDate { year month day }
+                  isAdult
+                }
+              }
+            }
+          }
+        }
+    ", ['id' => $id], CACHE_TTL_INFO);
+
+    $media = $data['Media'] ?? null;
+    return is_array($media) ? $media : null;
+}
+
+/**
+ * Ordered Season 1..N tabs for an AniList franchise.
+ *
+ * Walks SEQUEL/PREQUEL from the current title (page relations first, then a
+ * small BFS with cached fetches). Only TV-like nodes are kept so OVAs/movies
+ * do not steal season numbers. Returns [] when fewer than 2 seasons.
+ *
+ * @return array<int, array{id:string,anilist_id:int,title:string,label:string,
+ *                          episodes:int,year:int,active:bool,url:string}>
+ */
+function anilist_season_chain(array $current, array $relations = []): array {
+    $curId = (int)($current['anilist_id'] ?? 0);
+    if ($curId <= 0) {
+        $curId = (int)(anilist_anilist_from_id($current['id'] ?? '') ?: 0);
+    }
+    if ($curId <= 0) return [];
+
+    $meta = [];
+    $seq  = [];
+    $pre  = [];
+    $expanded = [];
+
+    $put = function (array $item) use (&$meta) {
+        $id = (int)($item['anilist_id'] ?? 0);
+        if ($id <= 0 || isset($meta[$id])) return;
+        $meta[$id] = [
+            'id'          => $item['id'] ?? ('anilist:' . $id),
+            'anilist_id'  => $id,
+            'title'       => (string)($item['title'] ?? ''),
+            'poster'      => (string)($item['poster'] ?? ''),
+            'format'      => strtoupper((string)($item['format'] ?? ($item['type'] ?? ''))),
+            'episodes'    => max((int)($item['episodes'] ?? 0), (int)($item['aired_episodes'] ?? 0)),
+            'year'        => (int)($item['year'] ?? 0),
+            'aired'       => (string)($item['aired'] ?? ''),
+            'is_adult'    => !empty($item['is_adult']),
+        ];
+    };
+
+    $link = function ($fromId, $toId, $type) use (&$seq, &$pre) {
+        $fromId = (int)$fromId;
+        $toId   = (int)$toId;
+        if ($fromId <= 0 || $toId <= 0 || $fromId === $toId) return;
+        if ($type === 'SEQUEL') {
+            if (!in_array($toId, $seq[$fromId] ?? [], true)) $seq[$fromId][] = $toId;
+        } else {
+            if (!in_array($toId, $pre[$fromId] ?? [], true)) $pre[$fromId][] = $toId;
+        }
+    };
+
+    $put($current);
+
+    $hasChainRel = false;
+    foreach ($relations as $rel) {
+        $type = strtoupper((string)($rel['relation_type'] ?? ''));
+        if ($type !== 'SEQUEL' && $type !== 'PREQUEL') continue;
+        $hasChainRel = true;
+        $rid = (int)($rel['anilist_id'] ?? 0);
+        if ($rid <= 0 || $rid === $curId) continue;
+        if (!empty($rel['is_adult'])) continue;
+        $put($rel);
+        $link($curId, $rid, $type);
+    }
+    // No sequel/prequel edges on this title → single-season, skip network walk.
+    if (!$hasChainRel) return [];
+
+    // Current title's relations already came from the page detail query.
+    $expanded[$curId] = true;
+
+    // Expand neighbors until the chain is closed (bounded — each hit is cached).
+    $queue   = array_keys($meta);
+    $budget  = 10;
+    $maxSeen = 32;
+    while ($queue && $budget > 0 && count($meta) < $maxSeen) {
+        $id = (int)array_shift($queue);
+        if ($id <= 0 || isset($expanded[$id])) continue;
+        $expanded[$id] = true;
+        $budget--;
+
+        $media = anilist_sequel_prequel_media($id);
+        if (!$media) continue;
+
+        // Re-seed the hub node itself (title/format may only exist here).
+        $hub = anilist_normalize($media);
+        if ($hub && empty($media['isAdult'])) $put($hub);
+
+        foreach (($media['relations']['edges'] ?? []) as $edge) {
+            $type = strtoupper((string)($edge['relationType'] ?? ''));
+            if ($type !== 'SEQUEL' && $type !== 'PREQUEL') continue;
+            $node = $edge['node'] ?? null;
+            if (!is_array($node) || empty($node['id'])) continue;
+            if (!empty($node['isAdult'])) continue;
+            $n = anilist_normalize($node);
+            if (!$n) continue;
+            $nid = (int)$n['anilist_id'];
+            $put($n);
+            $link($id, $nid, $type);
+            if (!isset($expanded[$nid])) $queue[] = $nid;
+        }
+    }
+
+    // SEQUEL/PREQUEL component containing the current title.
+    $component = [];
+    $visited   = [];
+    $bfs       = [$curId];
+    while ($bfs) {
+        $id = (int)array_shift($bfs);
+        if ($id <= 0 || isset($visited[$id]) || !isset($meta[$id])) continue;
+        $visited[$id] = true;
+        $component[]  = $id;
+        foreach (array_merge($seq[$id] ?? [], $pre[$id] ?? []) as $nid) {
+            if (!isset($visited[$nid])) $bfs[] = (int)$nid;
+        }
+    }
+
+    // Keep mainline seasons (+ always the current title). Drop adult extras.
+    $keep = [];
+    foreach ($component as $id) {
+        if (!isset($meta[$id])) continue;
+        if (!empty($meta[$id]['is_adult']) && $id !== $curId) continue;
+        $fmt = $meta[$id]['format'];
+        if ($id === $curId || in_array($fmt, ['TV', 'TV_SHORT', 'ONA'], true)) {
+            $keep[] = $id;
+        }
+    }
+    if (count($keep) < 2) return [];
+
+    $keepSet = array_flip($keep);
+    $subSeq  = [];
+    $subPre  = [];
+    foreach ($keep as $id) {
+        foreach ($seq[$id] ?? [] as $n) {
+            if (isset($keepSet[$n])) $subSeq[$id][] = (int)$n;
+        }
+        foreach ($pre[$id] ?? [] as $n) {
+            if (isset($keepSet[$n])) $subPre[$id][] = (int)$n;
+        }
+    }
+
+    $byDate = function ($a, $b) use ($meta) {
+        return [$meta[$a]['year'] ?: 0, $meta[$a]['aired'] ?: '', $a]
+            <=> [$meta[$b]['year'] ?: 0, $meta[$b]['aired'] ?: '', $b];
+    };
+
+    // Root = node with no prequel inside the kept set.
+    $roots = array_values(array_filter($keep, fn($id) => empty($subPre[$id])));
+    $ordered = [];
+    if ($roots) {
+        // Prefer the root that can reach the current title.
+        $start = $roots[0];
+        foreach ($roots as $r) {
+            $seenR = [];
+            $qR    = [$r];
+            while ($qR) {
+                $x = (int)array_shift($qR);
+                if ($x <= 0 || isset($seenR[$x])) continue;
+                $seenR[$x] = true;
+                if ($x === $curId) { $start = $r; break; }
+                foreach ($subSeq[$x] ?? [] as $n) $qR[] = $n;
+            }
+        }
+
+        $seen = [];
+        $id   = $start;
+        while ($id && isset($meta[$id]) && !isset($seen[$id])) {
+            $seen[$id]  = true;
+            $ordered[]  = $id;
+            $nexts      = $subSeq[$id] ?? [];
+            // Branching sequels: take the first, rest are appended by date below.
+            $id = $nexts[0] ?? null;
+        }
+        // Interleave orphans by air date so season numbers stay stable after reload.
+        $orphans = array_values(array_filter($keep, fn($x) => !isset($seen[$x])));
+        usort($orphans, $byDate);
+        foreach ($orphans as $x) {
+            $at = count($ordered);
+            for ($i = 0, $c = count($ordered); $i < $c; $i++) {
+                if ($byDate($x, $ordered[$i]) < 0) { $at = $i; break; }
+            }
+            array_splice($ordered, $at, 0, [$x]);
+        }
+    } else {
+        $ordered = $keep;
+        usort($ordered, $byDate);
+    }
+
+    // Guarantee current is present (broken edge cases).
+    if (!in_array($curId, $ordered, true)) {
+        $ordered[] = $curId;
+        usort($ordered, $byDate);
+    }
+
+    // Group split-cour parts ("Part 2", "Cour 2", …) into the previous season.
+    $out        = [];
+    $seasonNum  = 0;
+    foreach ($ordered as $id) {
+        if (!isset($meta[$id])) continue;
+        $m     = $meta[$id];
+        $title = $m['title'];
+        $isContinuation = $seasonNum > 0
+            && (bool)preg_match('/\b(?:part|cour)\s*[2-9]\b/i', $title);
+        if (!$isContinuation) {
+            $seasonNum++;
+            $out[] = [
+                'id'         => $m['id'],
+                'anilist_id' => $id,
+                'title'      => $m['title'],
+                'label'      => 'Season ' . $seasonNum,
+                'season_num' => $seasonNum,
+                'episodes'   => $m['episodes'],
+                'year'       => $m['year'],
+                'active'     => ($id === $curId),
+                'url'        => './watch.php?id=' . rawurlencode($m['id']),
+                'members'    => [[
+                    'id'         => $m['id'],
+                    'anilist_id' => $id,
+                    'title'      => $m['title'],
+                    'episodes'   => $m['episodes'],
+                    'current'    => ($id === $curId),
+                ]],
+            ];
+        } else {
+            $idx = count($out) - 1;
+            $out[$idx]['episodes'] = (int)$out[$idx]['episodes'] + (int)$m['episodes'];
+            if ($id === $curId) $out[$idx]['active'] = true;
+            $out[$idx]['members'][] = [
+                'id'         => $m['id'],
+                'anilist_id' => $id,
+                'title'      => $m['title'],
+                'episodes'   => $m['episodes'],
+                'current'    => ($id === $curId),
+            ];
+        }
+    }
+
+    return count($out) >= 2 ? $out : [];
 }

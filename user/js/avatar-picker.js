@@ -28,8 +28,9 @@
     }
 
     // The profile tab can be re-fetched; drop any stale copy left in <body>.
+    // Keep the rank ladder modal — it shares the .kp-avatar-modal class.
     document.querySelectorAll('body > .kp-avatar-modal').forEach((node) => {
-        if (node !== modal) node.remove();
+        if (node !== modal && node.id !== 'kp-rank-modal') node.remove();
     });
 
     let lastFocus = null;

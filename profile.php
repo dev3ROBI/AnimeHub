@@ -340,5 +340,6 @@ if (!empty($user['User_Join'])) {
 </div>
 
 <script src="./user/js/avatar-picker.js" defer></script>
+<script src="./user/js/rank-modal.js" defer></script>
 
 <?php include 'includes/footer.php'; ?>

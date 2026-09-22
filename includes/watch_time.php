@@ -284,6 +284,43 @@ function watch_time_rank($user_id) {
     ];
 }
 
+/**
+ * Full rank ladder for the "View all ranks" popup.
+ * Returns every tier with unlocked / current flags based on the user's total.
+ */
+function watch_time_rank_ladder($user_id) {
+    $totals = watch_time_totals($user_id);
+    $seconds = (int)($totals['seconds'] ?? 0);
+
+    $ranks = [
+        [0,           'newbie',      'Newbie',          'fa-solid fa-seedling',         '#8b8f95'],
+        [300,         'viewer',      'Viewer',          'fa-solid fa-eye',              '#6c757d'],
+        [1800,        'watcher',     'Watcher',         'fa-solid fa-play',             '#0d6efd'],
+        [7200,        'bingelord',   'Binge Lord',      'fa-solid fa-fire',             '#fd7e14'],
+        [21600,       'otaku',       'Otaku',           'fa-solid fa-star',             '#ffc107'],
+        [86400,       'sensei',      'Sensei',          'fa-solid fa-graduation-cap',   '#198754'],
+        [259200,      'legend',      'Legendary',       'fa-solid fa-crown',            '#ff2e63'],
+        [604800,      'no-life',     'No Life',         'fa-solid fa-skull',            '#9b59b6'],
+        [1209600,     'otaku-god',   'Otaku God',       'fa-solid fa-bolt',             '#e74c3c'],
+        [2592000,     'weeb-king',   'Weeb King',       'fa-solid fa-trophy',           '#f1c40f'],
+    ];
+
+    $currentKey = 'newbie';
+    foreach ($ranks as $tier) {
+        if ($seconds >= $tier[0]) $currentKey = $tier[1];
+    }
+
+    return array_map(fn($t) => [
+        'min'     => (int)$t[0],
+        'key'     => $t[1],
+        'title'   => $t[2],
+        'icon'    => $t[3],
+        'color'   => $t[4],
+        'unlocked'=> $seconds >= $t[0],
+        'current' => $t[1] === $currentKey,
+    ], $ranks);
+}
+
 /** Seconds watched in the current calendar week (Monday → today). */
 function watch_time_this_week($user_id) {
     global $pdo;
