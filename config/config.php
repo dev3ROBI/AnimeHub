@@ -71,6 +71,10 @@ if (!defined('CACHE_TTL_SCHEDULE')) define('CACHE_TTL_SCHEDULE', 3600);
 if (!defined('CACHE_TTL_STREAM'))  define('CACHE_TTL_STREAM', 120);    // stream tokens rotate
 if (!defined('CACHE_TTL_HEALTH'))  define('CACHE_TTL_HEALTH', 60);
 
+// ─── TMDB catalog cache (movies / TV) ────────────────────────────────
+if (!defined('CACHE_TTL_TMDB_LIST'))  define('CACHE_TTL_TMDB_LIST', 3600);  // 1h
+if (!defined('CACHE_TTL_TMDB_INFO'))  define('CACHE_TTL_TMDB_INFO', 21600); // 6h
+
 // Keep the legacy constants the old wrappers used.
 if (!defined('REANIME_CACHE_TTL')) define('REANIME_CACHE_TTL', CACHE_TTL_INFO);
 if (!defined('ANIKURO_CACHE_TTL')) define('ANIKURO_CACHE_TTL', CACHE_TTL_INFO);
@@ -166,4 +170,24 @@ if (!function_exists('catalog_order')) {
         }
         return $out ?: ['anilist'];
     }
+}
+
+// ─── Movie embed providers (fallback chain) ──────────────────────────
+if (!isset($GLOBALS['MOVIE_EMBED_PROVIDERS'])) {
+    $GLOBALS['MOVIE_EMBED_PROVIDERS'] = [
+        'vidsrc-to'  => ['label' => 'VidSrc',    'url' => 'https://vidsrc.to/embed/movie/{tmdb}'],
+        'vidsrc-me'  => ['label' => 'VidSrc.me', 'url' => 'https://vidsrc.me/embed/movie?tmdb={tmdb}'],
+        '2embed'     => ['label' => '2Embed',    'url' => 'https://2embed.cc/embed/movie/{tmdb}'],
+        'superembed' => ['label' => 'SuperEmbed','url' => 'https://superembed.stream/movie/{tmdb}'],
+    ];
+}
+
+// ─── TV embed providers (fallback chain) ─────────────────────────────
+if (!isset($GLOBALS['TV_EMBED_PROVIDERS'])) {
+    $GLOBALS['TV_EMBED_PROVIDERS'] = [
+        'vidsrc-to'  => ['label' => 'VidSrc',    'url' => 'https://vidsrc.to/embed/tv/{tmdb}/{season}/{episode}'],
+        'vidsrc-me'  => ['label' => 'VidSrc.me', 'url' => 'https://vidsrc.me/embed/tv?tmdb={tmdb}&season={season}&episode={episode}'],
+        '2embed'     => ['label' => '2Embed',    'url' => 'https://2embed.cc/embed/tv/{tmdb}/{season}/{episode}'],
+        'superembed' => ['label' => 'SuperEmbed','url' => 'https://superembed.stream/tv/{tmdb}/{season}/{episode}'],
+    ];
 }

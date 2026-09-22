@@ -2886,3 +2886,137 @@
     width: calc(100vw - 32px);
   }
 }
+
+/* ── Movies & TV Section ──────────────────────────────────────────────── */
+.kp-content-type-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  padding: 0 8px;
+}
+
+.kp-ct-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  background: #1a1d2e;
+  border-radius: 14px;
+  text-decoration: none;
+  color: #fff;
+  transition: all 0.25s ease;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.kp-ct-card:hover {
+  background: #222640;
+  border-color: rgba(255, 46, 99, 0.2);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.kp-ct-icon {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: rgba(255, 46, 99, 0.12);
+  color: #ff2e63;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.kp-ct-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.kp-ct-title {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: #e8e8e8;
+}
+
+.kp-ct-sub {
+  display: block;
+  font-size: 11px;
+  color: #666;
+  margin-top: 2px;
+}
+
+.kp-ct-arrow {
+  color: #444;
+  font-size: 12px;
+  transition: all 0.2s ease;
+}
+
+.kp-ct-card:hover .kp-ct-arrow {
+  color: #ff2e63;
+  transform: translateX(3px);
+}
+
+/* ── Pagination ────────────────────────────────────────────────────────── */
+.kp-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px 16px;
+}
+
+.kp-page-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  background: #1a1d2e;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  color: #ccc;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  font-family: 'Poppins', sans-serif;
+}
+
+.kp-page-btn:hover {
+  background: rgba(255, 46, 99, 0.12);
+  border-color: rgba(255, 46, 99, 0.3);
+  color: #ff2e63;
+}
+
+.kp-page-info {
+  font-size: 13px;
+  color: #666;
+}
+
+/* ── Empty State ────────────────────────────────────────────────────────── */
+.kp-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 48px 16px;
+  color: #555;
+  text-align: center;
+}
+
+.kp-empty-state i {
+  font-size: 32px;
+  color: #333;
+}
+
+.kp-empty-state h4 {
+  font-size: 15px;
+  color: #888;
+  font-weight: 600;
+}
+
+.kp-empty-state p {
+  font-size: 12px;
+  color: #555;
+}

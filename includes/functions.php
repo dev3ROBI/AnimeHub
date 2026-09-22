@@ -98,7 +98,19 @@ function render_anime_card($item, array $opts = []) {
 
     // Episode info bar at bottom of poster
     $epBar = '';
-    if ($currentEp > 0 || $totalEps > 0) {
+    $contentType = $item['content_type'] ?? '';
+    if ($contentType === 'movie') {
+        // Movies: show a "Movie" badge instead of episode counts
+        $epBar = '<div class="kp-card-ep-bar"><span><i class="fas fa-film"></i> Movie</span></div>';
+    } elseif ($contentType === 'tv') {
+        // TV shows: show seasons + total episodes
+        $seasons = $item['seasons_count'] ?? $item['episodes'] ?? 0;
+        $totalEpsTv = $item['total_episodes'] ?? $item['aired_episodes'] ?? 0;
+        $epBar = '<div class="kp-card-ep-bar">'
+            . '<span><i class="fas fa-layer-group"></i> ' . ($seasons ?: '?') . 'S</span>'
+            . '<span><i class="fas fa-closed-captioning"></i> ' . ($totalEpsTv ?: '?') . 'E</span>'
+            . '</div>';
+    } elseif ($currentEp > 0 || $totalEps > 0) {
         $epBar = '<div class="kp-card-ep-bar">'
             . '<span><i class="fas fa-closed-captioning"></i> ' . ($currentEp ?: '?') . '</span>'
             . '<span><i class="fas fa-microphone"></i> ' . ($item['has_dub'] ? ($currentEp ?: '?') : '—') . '</span>'

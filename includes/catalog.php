@@ -16,6 +16,7 @@ include_once __DIR__ . '/anilist_api.php';
 include_once __DIR__ . '/jikan_api.php';
 include_once __DIR__ . '/reanime_api.php';
 include_once __DIR__ . '/anikuro_api.php';
+include_once __DIR__ . '/tmdb_movie_api.php';
 
 // ─── ID scheme: "{provider}:{remote id}" ───────────────────────────────
 
@@ -29,7 +30,7 @@ function catalog_make_id($provider, $remoteId) {
  */
 function catalog_parse_id($raw) {
     $raw = (string)$raw;
-    $providers = ['anilist', 'reanime', 'jikan', 'anikuro'];
+    $providers = ['anilist', 'reanime', 'jikan', 'anikuro', 'tmdb'];
     foreach ($providers as $p) {
         if (strpos($raw, $p . ':') === 0) {
             $remote = substr($raw, strlen($p) + 1);
@@ -321,6 +322,18 @@ function catalog_search($term, $limit = 20) {
         }
     }
 
+    // Also search TMDB for movies and TV
+    if (TMDB_ENABLED && count(catalog_dedupe($merged)) < $limit) {
+        try {
+            $remaining = $limit - count(catalog_dedupe($merged));
+            $movies = tmdb_movie_search($term, 1);
+            $tv = tmdb_tv_search($term, 1);
+            $merged = array_merge($merged, array_slice($movies, 0, $remaining), array_slice($tv, 0, $remaining));
+        } catch (Exception $e) {
+            error_log("[catalog] TMDB search failed: " . $e->getMessage());
+        }
+    }
+
     $merged = catalog_dedupe(catalog_fill_items($merged));
     return array_slice($merged, 0, $limit);
 }
@@ -352,6 +365,15 @@ function catalog_info_from($provider, $remoteId) {
             $item['provider'] = 'anikuro';
             $item['provider_id'] = (string)$remoteId;
             return $item;
+
+        case 'tmdb':
+            // remoteId is "movie:123" or "tv:123"
+            if (preg_match('/^movie:(\d+)$/', $remoteId, $m)) {
+                return tmdb_movie_detail((int)$m[1]);
+            } elseif (preg_match('/^tv:(\d+)$/', $remoteId, $m)) {
+                return tmdb_tv_detail((int)$m[1]);
+            }
+            return null;
     }
     return null;
 }
@@ -447,6 +469,14 @@ function catalog_episodes($rawId, $hintTitle = null) {
 
         case 'anikuro':
             return anikuro_episodes($remoteId) ?: [];
+
+        case 'tmdb':
+            if (preg_match('/^tv:(\d+)$/', $remoteId, $m)) {
+                $detail = tmdb_tv_detail((int)$m[1]);
+                return $detail['episodes_list'] ?? [];
+            }
+            // Movie has a single "episode"
+            return [['number' => 1, 'title' => '', 'image' => '', 'aired' => '']];
 
         default:
             break;

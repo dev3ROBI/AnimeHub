@@ -10,6 +10,9 @@ include_once './includes/db.php';
 include_once './includes/functions.php';
 include_once './includes/stream.php';
 include_once './includes/progress.php';
+include_once './includes/tmdb_movie_api.php';
+include_once './includes/embed_movie.php';
+include_once './includes/embed_tv.php';
 
 if (!isset($_GET['id']) || trim($_GET['id']) === '') {
     include_once './includes/header.php';
@@ -23,7 +26,10 @@ if (!isset($_GET['id']) || trim($_GET['id']) === '') {
 $raw_id   = trim((string)$_GET['id']);
 $parsed   = catalog_parse_id($raw_id);
 $provider = $parsed['provider'] ?? 'legacy';
-$is_api   = in_array($provider, ['anilist', 'reanime', 'jikan', 'anikuro'], true);
+$is_api   = in_array($provider, ['anilist', 'reanime', 'jikan', 'anikuro', 'tmdb'], true);
+$is_tmdb  = ($provider === 'tmdb');
+$is_tmdb_movie = $is_tmdb && preg_match('/^movie:\d+$/', $parsed['id'] ?? '');
+$is_tmdb_tv    = $is_tmdb && preg_match('/^tv:\d+$/', $parsed['id'] ?? '');
 
 $start_episode  = isset($_GET['ep']) ? max(1, intval($_GET['ep'])) : 1;
 $requested_lang = (strtolower($_GET['lang'] ?? 'sub') === 'dub') ? 'dub' : 'sub';
@@ -41,7 +47,26 @@ $episode_id  = isset($_GET['episode']) ? intval($_GET['episode']) : null;
 $video_url   = null;
 
 if ($is_api) {
-    if ($provider === 'anikuro') {
+    if ($is_tmdb_movie) {
+        // TMDB Movie route
+        preg_match('/^movie:(\d+)$/', $parsed['id'] ?? '', $m);
+        $tmdb_movie_id = (int)($m[1] ?? 0);
+        $anime_data = tmdb_movie_detail($tmdb_movie_id);
+        $is_movie = true;
+        if ($anime_data) {
+            $episodes_list = $anime_data['episodes_list'] ?? [];
+        }
+    } elseif ($is_tmdb_tv) {
+        // TMDB TV route
+        preg_match('/^tv:(\d+)$/', $parsed['id'] ?? '', $m);
+        $tmdb_tv_id = (int)($m[1] ?? 0);
+        $start_episode = max(1, intval($_GET['ep'] ?? 1));
+        $season_id = max(1, intval($_GET['season'] ?? 1));
+        $anime_data = tmdb_tv_detail($tmdb_tv_id);
+        if ($anime_data) {
+            $episodes_list = $anime_data['episodes_list'] ?? [];
+        }
+    } elseif ($provider === 'anikuro') {
         $session = anikuro_session_from_id($raw_id);
         $fetched = $session ? anikuro_info($session) : null;
         if ($fetched) {
@@ -572,9 +597,15 @@ include_once './includes/header.php';
             episode: <?= (int)$start_episode ?>,
             lang: '<?= $requested_lang ?>',
             userId: <?= $user_id ? (int)$user_id : 'null' ?>,
+            isTmdb: <?= $is_tmdb ? 'true' : 'false' ?>,
+            isTmdbMovie: <?= $is_tmdb_movie ? 'true' : 'false' ?>,
+            isTmdbTv: <?= $is_tmdb_tv ? 'true' : 'false' ?>,
+            tmdbType: '<?= $is_tmdb_movie ? 'movie' : ($is_tmdb_tv ? 'tv' : '') ?>',
+            tmdbId: <?= $is_tmdb ? (int)($parsed['id'] ?? 0) : 'null' ?>,
+            season: <?= $season_id ? (int)$season_id : 'null' ?>,
             resume: <?= json_encode($resume ?: null, JSON_UNESCAPED_UNICODE) ?>,
             episodes: <?= json_encode(
-                array_map(fn($e) => ['n' => (int)$e['number'], 't' => (string)($e['title'] ?? '')], $episodes_list),
+                array_map(fn($e) => ['n' => (int)$e['number'], 't' => (string)($e['title'] ?? ''), 's' => (int)($e['season'] ?? 1)], $episodes_list),
                 JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP
             ) ?>
         };
@@ -1378,6 +1409,51 @@ include_once './includes/header.php';
             }
             destroyPlayers();
             refreshResume(ep);
+
+            // TMDB movies/TV use embed players, not the regular stream resolver
+            if (KP.isTmdbMovie) {
+                var movieParams = new URLSearchParams({ tmdb: KP.tmdbId });
+                return fetch('./includes/get_movie_stream.php?' + movieParams.toString())
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        payload = data;
+                        if (!data || !data.ok) {
+                            if (chipsEl) chipsEl.innerHTML = '';
+                            setState('error', { message: 'No source found for this movie.' });
+                            return;
+                        }
+                        renderServers(data.servers || []);
+                        if (autoplay) playPayload();
+                        else { setState('gate'); updateGate(); }
+                    })
+                    .catch(function(err) {
+                        console.error('resolve error', err);
+                        if (chipsEl) chipsEl.innerHTML = '';
+                        setState('error', { message: 'Network error.' });
+                    });
+            }
+
+            if (KP.isTmdbTv) {
+                var tvParams = new URLSearchParams({ tmdb: KP.tmdbId, season: KP.season || 1, episode: ep });
+                return fetch('./includes/get_tv_stream.php?' + tvParams.toString())
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        payload = data;
+                        if (!data || !data.ok) {
+                            if (chipsEl) chipsEl.innerHTML = '';
+                            setState('error', { message: 'No source found for this episode.' });
+                            return;
+                        }
+                        renderServers(data.servers || []);
+                        if (autoplay) playPayload();
+                        else { setState('gate'); updateGate(); }
+                    })
+                    .catch(function(err) {
+                        console.error('resolve error', err);
+                        if (chipsEl) chipsEl.innerHTML = '';
+                        setState('error', { message: 'Network error.' });
+                    });
+            }
 
             const params = new URLSearchParams({ id: KP.id, ep: ep, lang: currentMode || currentLang, title: KP.title });
 

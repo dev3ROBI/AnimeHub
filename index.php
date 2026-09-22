@@ -175,6 +175,47 @@ $quickStats = [
         </div>
         <?php endif; ?>
 
+        <!-- Movies & TV Quick Links -->
+        <div class="kp-section">
+            <div class="kp-section-head">
+                <h2><span class="kp-head-bar"></span>Movies & TV Series</h2>
+            </div>
+            <div class="kp-content-type-grid">
+                <a href="./movies.php?section=trending" class="kp-ct-card">
+                    <div class="kp-ct-icon"><i class="fas fa-clapperboard"></i></div>
+                    <div class="kp-ct-info">
+                        <span class="kp-ct-title">Movies</span>
+                        <span class="kp-ct-sub">Trending & Popular</span>
+                    </div>
+                    <i class="fas fa-arrow-right kp-ct-arrow"></i>
+                </a>
+                <a href="./tv.php?section=trending" class="kp-ct-card">
+                    <div class="kp-ct-icon"><i class="fas fa-tv"></i></div>
+                    <div class="kp-ct-info">
+                        <span class="kp-ct-title">TV Series</span>
+                        <span class="kp-ct-sub">Airing & Popular</span>
+                    </div>
+                    <i class="fas fa-arrow-right kp-ct-arrow"></i>
+                </a>
+                <a href="./movies.php?section=now_playing" class="kp-ct-card">
+                    <div class="kp-ct-icon"><i class="fas fa-popcorn"></i></div>
+                    <div class="kp-ct-info">
+                        <span class="kp-ct-title">Now Playing</span>
+                        <span class="kp-ct-sub">In Theaters</span>
+                    </div>
+                    <i class="fas fa-arrow-right kp-ct-arrow"></i>
+                </a>
+                <a href="./tv.php?section=airing_today" class="kp-ct-card">
+                    <div class="kp-ct-icon"><i class="fas fa-calendar-day"></i></div>
+                    <div class="kp-ct-info">
+                        <span class="kp-ct-title">Airing Today</span>
+                        <span class="kp-ct-sub">New Episodes</span>
+                    </div>
+                    <i class="fas fa-arrow-right kp-ct-arrow"></i>
+                </a>
+            </div>
+        </div>
+
         <!-- Top 10 This Week -->
         <?php if (!empty($top10)): ?>
         <div class="kp-section kp-top10-section">

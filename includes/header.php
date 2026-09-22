@@ -119,8 +119,8 @@ if (!empty($_SESSION['userID'])) {
 
             <li class="drawer-divider"></li>
 
-            <li onclick="openComingSoon('movies')"><i class="fas fa-clapperboard" style="width: 25px;"></i> Movies <span class="drawer-badge">Soon</span></li>
-            <li onclick="openComingSoon('series')"><i class="fas fa-tv" style="width: 25px;"></i> Series <span class="drawer-badge">Soon</span></li>
+            <li onclick="window.location.href='movies.php'"><i class="fas fa-clapperboard" style="width: 25px;"></i> Movies</li>
+            <li onclick="window.location.href='tv.php'"><i class="fas fa-tv" style="width: 25px;"></i> Series</li>
 
             <li class="drawer-divider"></li>
 
