@@ -1,0 +1,90 @@
+.upload-container {
+    max-width: 1200px;
+    margin: auto;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    padding: 20px;
+}
+
+.upload-container h2 {
+    text-align: center;
+    color: #ffffff;
+    margin-bottom: 10px;
+}
+
+.upload-container .add-movies,
+.upload-container .add-show,
+.upload-container .add-season,
+.upload-container .add-episode {
+    flex: 1 1 calc(50% - 20px);
+    background-color: #292929;
+    border-radius: 6px;
+    height: max-content;
+    padding: 12px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+    margin-bottom: 30px;
+    transition: transform 0.2s ease;
+}
+
+.upload-container form {
+    display: flex;
+    flex-direction: column;
+}
+
+.upload-container label {
+    margin-bottom: 6px;
+    font-weight: 600;
+    color: #cccccc;
+}
+
+.upload-container input[type="text"],
+.upload-container input[type="url"],
+.upload-container input[type="number"],
+.upload-container input[type="date"],
+.upload-container select {
+    padding: 10px;
+    background-color: #2a2a2a;
+    border: 1px solid #444;
+    color: #ffffff;
+    border-radius: 8px;
+    font-size: 14px;
+    transition: border-color 0.3s, background-color 0.3s;
+}
+
+.upload-container input[type="text"]:focus,
+.upload-container input[type="url"]:focus,
+.upload-container input[type="number"]:focus,
+.upload-container input[type="date"]:focus {
+    border-color: #ff2e63;
+    background-color: #2e2e2e;
+    outline: none;
+}
+
+.upload-container input[type="submit"] {
+    background-color: #ff2e63;
+    color: white;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.upload-container input[type="submit"]:hover {
+    background-color: #cb0738;
+}
+
+@media screen and (max-width: 600px) {
+    .upload-container {
+        padding: 15px;
+    }
+
+    .upload-container .add-movies,
+    .upload-container .add-show,
+    .upload-container .add-season,
+    .upload-container .add-episode {
+        padding: 20px;
+    }
+}
