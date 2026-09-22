@@ -175,21 +175,21 @@ if (!function_exists('catalog_order')) {
 // ─── Movie embed providers (fallback chain) ──────────────────────────
 if (!isset($GLOBALS['MOVIE_EMBED_PROVIDERS'])) {
     $GLOBALS['MOVIE_EMBED_PROVIDERS'] = [
-        'vidsrc-cc'   => ['label' => 'VidSrc',     'url' => 'https://vidsrc.cc/v2/embed/movie/{tmdb}'],
-        'vidsrc-to'   => ['label' => 'VidSrc (to)', 'url' => 'https://vidsrc.to/embed/movie/{tmdb}'],
+        'vidsrc-to'   => ['label' => 'VidSrc',     'url' => 'https://vidsrc.to/embed/movie/{tmdb}'],
         'vidsrcme-su' => ['label' => 'VidSrc (me)', 'url' => 'https://vidsrcme.su/embed/movie/{tmdb}'],
         'vidsrc-link' => ['label' => 'VidSrc (link)','url' => 'https://vidsrc.link/embed/movie/{tmdb}'],
         'vid-src-top' => ['label' => 'VidSrc (top)','url' => 'https://vid-src.top/embed/movie/{tmdb}'],
+        'vidsrc-tw'   => ['label' => 'VidSrc (tw)', 'url' => 'https://vidsrc.tw/embed/movie/{tmdb}'],
     ];
 }
 
 // ─── TV embed providers (fallback chain) ─────────────────────────────
 if (!isset($GLOBALS['TV_EMBED_PROVIDERS'])) {
     $GLOBALS['TV_EMBED_PROVIDERS'] = [
-        'vidsrc-cc'   => ['label' => 'VidSrc',     'url' => 'https://vidsrc.cc/v2/embed/tv/{tmdb}/{season}/{episode}'],
-        'vidsrc-to'   => ['label' => 'VidSrc (to)', 'url' => 'https://vidsrc.to/embed/tv/{tmdb}/{season}/{episode}'],
+        'vidsrc-to'   => ['label' => 'VidSrc',     'url' => 'https://vidsrc.to/embed/tv/{tmdb}/{season}/{episode}'],
         'vidsrcme-su' => ['label' => 'VidSrc (me)', 'url' => 'https://vidsrcme.su/embed/tv/{tmdb}/{season}/{episode}'],
         'vidsrc-link' => ['label' => 'VidSrc (link)','url' => 'https://vidsrc.link/embed/tv/{tmdb}/{season}/{episode}'],
         'vid-src-top' => ['label' => 'VidSrc (top)','url' => 'https://vid-src.top/embed/tv/{tmdb}/{season}/{episode}'],
+        'vidsrc-tw'   => ['label' => 'VidSrc (tw)', 'url' => 'https://vidsrc.tw/embed/tv/{tmdb}/{season}/{episode}'],
     ];
 }

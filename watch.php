@@ -45,6 +45,7 @@ $episodes_list  = [];
 $season_id   = isset($_GET['season']) ? intval($_GET['season']) : null;
 $episode_id  = isset($_GET['episode']) ? intval($_GET['episode']) : null;
 $video_url   = null;
+$embedServers = [];
 
 if ($is_api) {
     if ($is_tmdb_movie) {
@@ -55,6 +56,12 @@ if ($is_api) {
         $is_movie = true;
         if ($anime_data) {
             $episodes_list = $anime_data['episodes_list'] ?? [];
+            // Set embed URL server-side for direct fallback
+            if (function_exists('movie_embed_resolve')) {
+                $embedData = movie_embed_resolve($tmdb_movie_id);
+                $video_url = $embedData['url'] ?? null;
+            }
+            $embedServers = function_exists('movie_embed_all') ? movie_embed_all($tmdb_movie_id) : [];
         }
     } elseif ($is_tmdb_tv) {
         // TMDB TV route
@@ -65,6 +72,12 @@ if ($is_api) {
         $anime_data = tmdb_tv_detail($tmdb_tv_id);
         if ($anime_data) {
             $episodes_list = $anime_data['episodes_list'] ?? [];
+            // Set embed URL server-side for direct fallback
+            if (function_exists('tv_embed_resolve')) {
+                $embedData = tv_embed_resolve($tmdb_tv_id, $season_id, $start_episode);
+                $video_url = $embedData['url'] ?? null;
+            }
+            $embedServers = function_exists('tv_embed_all') ? tv_embed_all($tmdb_tv_id, $season_id, $start_episode) : [];
         }
     } elseif ($provider === 'anikuro') {
         $session = anikuro_session_from_id($raw_id);
@@ -266,7 +279,7 @@ include_once './includes/header.php';
 
 <div class="watch-wrapper">
     <div class="video-box">
-        <div id="anime-player-container" class="kp-player-shell">
+        <div id="anime-player-container" class="kp-player-shell" data-embed-url="<?= kp_e($video_url ?? '') ?>">
             <div id="artplayer"></div>
             <div id="embedplayer" style="display:none;">
                 <iframe id="embed-frame" src="about:blank" allowfullscreen frameborder="0"
@@ -405,6 +418,27 @@ include_once './includes/header.php';
                 font-size: 11px;
                 opacity: .6;
             }
+
+            .kp-movie-info-card {
+                background: rgba(255,255,255,.06);
+                border: 1px solid rgba(255,255,255,.1);
+                border-radius: 10px;
+                padding: 14px;
+                margin-bottom: 12px;
+            }
+            .kp-movie-info-row {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 6px 0;
+                color: #ccc;
+                font-size: 13px;
+            }
+            .kp-movie-info-row i {
+                color: #ff2e63;
+                width: 18px;
+                text-align: center;
+            }
         </style>
         <?php endif; ?>
     </div>
@@ -423,15 +457,35 @@ include_once './includes/header.php';
                 <h4>Seasons<?= $episodes_total ? ' (' . (int)$episodes_total . ')' : '' ?></h4>
                 <div class="tmdb-season-tabs" id="tmdb-season-tabs"></div>
             </div>
+            <?php elseif ($is_tmdb_movie): ?>
+            <!-- TMDB Movie: no episode list needed -->
+            <div class="kp-movie-info-card">
+                <div class="kp-movie-info-row">
+                    <i class="fas fa-film"></i>
+                    <span>Movie</span>
+                </div>
+                <?php if (!empty($genre) && $genre !== 'N/A'): ?>
+                <div class="kp-movie-info-row">
+                    <i class="fas fa-tags"></i>
+                    <span><?= kp_e($genre) ?></span>
+                </div>
+                <?php endif; ?>
+                <?php if (!empty($runtime) && $runtime !== 'N/A'): ?>
+                <div class="kp-movie-info-row">
+                    <i class="fas fa-clock"></i>
+                    <span><?= kp_e($runtime) ?></span>
+                </div>
+                <?php endif; ?>
+            </div>
             <?php else: ?>
             <h4>Episodes<?= $episodes_total ? ' (' . (int)$episodes_total . ')' : '' ?></h4>
             <?php endif; ?>
-            <?php if (!empty($episodes_list)): ?>
+            <?php if (!empty($episodes_list) && !$is_tmdb_movie): ?>
                 <input type="text" id="ep-search" placeholder="Filter episode…" style="margin-bottom:6px;">
             <?php endif; ?>
+            <?php if (!$is_tmdb_movie): ?>
             <div class="episode-scroll">
                 <div class="episodes" id="anikuro-episode-container">
-                    <!-- Loading skeleton — replaced by buildEpisodeList() -->
                     <div class="kp-ep-skeleton" aria-hidden="true">
                         <?php for ($kpSkel = 0; $kpSkel < 6; $kpSkel++): ?>
                             <span class="kp-skel-row"></span>
@@ -440,12 +494,12 @@ include_once './includes/header.php';
                     <p class="kp-ep-loading" role="status"><i class="fas fa-spinner fa-spin"></i> এপিসোড লোড হচ্ছে…</p>
                 </div>
             </div>
+            <?php endif; ?>
 
             <!-- Episode Notes -->
             <?php if ($is_api && $user_id): ?>
             <div class="kp-notes">
                 <div class="kp-notes-head">
-                    <i class="fas fa-bookmark"></i>
                     <h4>My Notes</h4>
                     <span class="kp-notes-hint">প্লে করার সময়েই টাইমস্ট্যাম্প বসবে</span>
                 </div>
@@ -652,6 +706,8 @@ include_once './includes/header.php';
             isTmdbTv: <?= $is_tmdb_tv ? 'true' : 'false' ?>,
             tmdbType: '<?= $is_tmdb_movie ? 'movie' : ($is_tmdb_tv ? 'tv' : '') ?>',
             tmdbId: <?= $is_tmdb ? (int)($parsed['id'] ?? 0) : 'null' ?>,
+            serverEmbedUrl: <?= json_encode($video_url ?? null, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) ?>,
+            embedServers: <?= json_encode($embedServers ?? [], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) ?>,
             season: <?= $season_id ? (int)$season_id : '1' ?>,
             currentSeason: <?= $season_id ? (int)$season_id : '1' ?>,
             resume: <?= json_encode($resume ?: null, JSON_UNESCAPED_UNICODE) ?>,
@@ -1442,7 +1498,9 @@ include_once './includes/header.php';
             const epTitle = meta && meta.t ? meta.t : '';
 
             if (gateEpEl) {
-                if (KP.isTmdbTv) {
+                if (KP.isTmdbMovie) {
+                    gateEpEl.textContent = 'Watch Movie';
+                } else if (KP.isTmdbTv) {
                     gateEpEl.textContent = 'Season ' + KP.currentSeason + ' · Episode ' + currentEp + (KP.total ? ' of ' + KP.total : '');
                 } else {
                     gateEpEl.textContent = 'Episode ' + currentEp + (KP.total ? ' of ' + KP.total : '');
@@ -1461,9 +1519,13 @@ include_once './includes/header.php';
 
             var at = resumeTargetFor(currentEp);
             if (gatePlayLabel) {
-                gatePlayLabel.textContent = at > 0
-                    ? 'Resume from ' + formatClock(at)
-                    : 'Play Episode ' + currentEp;
+                if (KP.isTmdbMovie) {
+                    gatePlayLabel.textContent = 'Play Movie';
+                } else {
+                    gatePlayLabel.textContent = at > 0
+                        ? 'Resume from ' + formatClock(at)
+                        : 'Play Episode ' + currentEp;
+                }
             }
 
             if (gateNote) {
@@ -1516,7 +1578,15 @@ include_once './includes/header.php';
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
                         payload = data;
-                        if (!data || !data.ok) {
+                        if (!data || !data.ok || !data.url) {
+                            // Fallback: use PHP-resolved embed URL
+                            if (KP.serverEmbedUrl) {
+                                payload = { ok: true, mode: 'embed', url: KP.serverEmbedUrl, servers: KP.embedServers || [] };
+                                renderServers(KP.embedServers || []);
+                                if (autoplay) playPayload();
+                                else { setState('gate'); updateGate(); }
+                                return;
+                            }
                             if (chipsEl) chipsEl.innerHTML = '';
                             setState('error', { message: 'No source found for this movie.' });
                             return;
@@ -1527,6 +1597,14 @@ include_once './includes/header.php';
                     })
                     .catch(function(err) {
                         console.error('resolve error', err);
+                        // Fallback: use PHP-resolved embed URL
+                        if (KP.serverEmbedUrl) {
+                            payload = { ok: true, mode: 'embed', url: KP.serverEmbedUrl, servers: KP.embedServers || [] };
+                            renderServers(KP.embedServers || []);
+                            if (autoplay) playPayload();
+                            else { setState('gate'); updateGate(); }
+                            return;
+                        }
                         if (chipsEl) chipsEl.innerHTML = '';
                         setState('error', { message: 'Network error.' });
                     });
@@ -1538,7 +1616,15 @@ include_once './includes/header.php';
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
                         payload = data;
-                        if (!data || !data.ok) {
+                        if (!data || !data.ok || !data.url) {
+                            // Fallback: use PHP-resolved embed URL
+                            if (KP.serverEmbedUrl) {
+                                payload = { ok: true, mode: 'embed', url: KP.serverEmbedUrl, servers: KP.embedServers || [] };
+                                renderServers(KP.embedServers || []);
+                                if (autoplay) playPayload();
+                                else { setState('gate'); updateGate(); }
+                                return;
+                            }
                             if (chipsEl) chipsEl.innerHTML = '';
                             setState('error', { message: 'No source found for this episode.' });
                             return;
@@ -1549,6 +1635,14 @@ include_once './includes/header.php';
                     })
                     .catch(function(err) {
                         console.error('resolve error', err);
+                        // Fallback: use PHP-resolved embed URL
+                        if (KP.serverEmbedUrl) {
+                            payload = { ok: true, mode: 'embed', url: KP.serverEmbedUrl, servers: KP.embedServers || [] };
+                            renderServers(KP.embedServers || []);
+                            if (autoplay) playPayload();
+                            else { setState('gate'); updateGate(); }
+                            return;
+                        }
                         if (chipsEl) chipsEl.innerHTML = '';
                         setState('error', { message: 'Network error.' });
                     });
@@ -1634,19 +1728,23 @@ include_once './includes/header.php';
         }
 
         // ─── Episode list (built here so long series stay a small payload) ──
-        function episodeElement(number, title) {
+        function episodeElement(number, title, season) {
             const el = document.createElement('div');
             const active = (number === currentEp);
             el.className = 'episode kp-ep' + (active ? ' active-play' : '');
             el.dataset.episode = number;
-            el.dataset.search = ('ep ' + number + ' ' + (title || '')).toLowerCase();
+            el.dataset.search = ('ep ' + number + ' ' + (title || '') + ' s' + (season || 1) + ' e' + number).toLowerCase();
 
             const label = document.createElement('span');
             label.className = 'kp-ep-main';
             const num = document.createElement('strong');
-            num.textContent = 'EP' + String(number).padStart(3, '0');
+            if (KP.isTmdbTv) {
+                num.textContent = 'S' + (season || KP.currentSeason || 1) + ' E' + number;
+            } else {
+                num.textContent = 'EP' + String(number).padStart(3, '0');
+            }
             label.appendChild(num);
-            if (title) {
+            if (title && !KP.isTmdbTv) {
                 const t = document.createElement('span');
                 t.className = 'kp-ep-title';
                 t.textContent = ' · ' + (title.length > 42 ? title.slice(0, 42) + '…' : title);
@@ -1729,7 +1827,7 @@ include_once './includes/header.php';
             }
 
             const frag = document.createDocumentFragment();
-            filtered.forEach(function (ep) { frag.appendChild(episodeElement(ep.n, ep.t)); });
+            filtered.forEach(function (ep) { frag.appendChild(episodeElement(ep.n, ep.t, ep.s)); });
             container.appendChild(frag);
 
             Object.keys(resumeCache).forEach(function (ep) {
