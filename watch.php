@@ -31,6 +31,15 @@ $is_tmdb  = ($provider === 'tmdb');
 $is_tmdb_movie = $is_tmdb && preg_match('/^movie:\d+$/', $parsed['id'] ?? '');
 $is_tmdb_tv    = $is_tmdb && preg_match('/^tv:\d+$/', $parsed['id'] ?? '');
 
+// The digits behind "movie:" / "tv:" — the id every embed request and every
+// rebuilt template URL needs. (int)('tv:224263') is 0, so it has to be parsed
+// out here; KP.tmdbId below used to hand 0 to get_tv_stream.php, which is why
+// TV episodes fell back to "/tv/0/{season}/{episode}" and the providers 404ed.
+$tmdb_remote_id = 0;
+if ($is_tmdb && preg_match('/^(?:movie|tv):(\d+)$/', (string)($parsed['id'] ?? ''), $kpTmdbMatch)) {
+    $tmdb_remote_id = (int)$kpTmdbMatch[1];
+}
+
 $start_episode  = isset($_GET['ep']) ? max(1, intval($_GET['ep'])) : 1;
 $requested_lang = (strtolower($_GET['lang'] ?? 'sub') === 'dub') ? 'dub' : 'sub';
 
@@ -531,7 +540,13 @@ include_once './includes/header.php';
             }
 
             .tmdb-seasons-wrap { margin-bottom: 8px; }
-            .tmdb-seasons-wrap h4 { margin-bottom: 8px; }
+            .tmdb-seasons-wrap h4 { margin-bottom: 6px; }
+            /* "18 episodes in total" — the heading itself only counts seasons. */
+            .kp-seasons-note {
+                margin: 0 0 8px;
+                color: #8b8f95;
+                font-size: 11.5px;
+            }
             .tmdb-season-tabs {
                 display: flex;
                 gap: 8px;
@@ -823,7 +838,12 @@ include_once './includes/header.php';
 
             <?php if ($is_tmdb_tv): ?>
             <div class="tmdb-seasons-wrap" id="tmdb-seasons-wrap">
-                <h4>Seasons<?= $episodes_total ? ' (' . (int)$episodes_total . ')' : '' ?></h4>
+                <?php /* Count of seasons here — $episodes_total is the episode count
+                         across the whole series and used to print as "Seasons (18)". */ ?>
+                <h4>Seasons<?= $season_count ? ' (' . (int)$season_count . ')' : '' ?></h4>
+                <?php if ($episodes_total > 0): ?>
+                <p class="kp-seasons-note"><?= (int)$episodes_total ?> episodes in total</p>
+                <?php endif; ?>
                 <div class="tmdb-season-tabs" id="tmdb-season-tabs"></div>
             </div>
             <?php elseif ($is_tmdb_movie): ?>
@@ -1154,10 +1174,18 @@ include_once './includes/header.php';
             isTmdbMovie: <?= $is_tmdb_movie ? 'true' : 'false' ?>,
             isTmdbTv: <?= $is_tmdb_tv ? 'true' : 'false' ?>,
             tmdbType: '<?= $is_tmdb_movie ? 'movie' : ($is_tmdb_tv ? 'tv' : '') ?>',
-            tmdbId: <?= $is_tmdb ? (int)($parsed['id'] ?? 0) : 'null' ?>,
+            tmdbId: <?= $is_tmdb ? (int)$tmdb_remote_id : 'null' ?>,
             serverEmbedUrl: <?= json_encode($video_url ?? null, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) ?>,
             embedServers: <?= json_encode($embedServers ?? [], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) ?>,
-            embedTemplates: <?= json_encode(array_map(fn($p) => ['label' => $p['label'] ?? '', 'url' => $p['url'] ?? ''], $GLOBALS['TV_EMBED_PROVIDERS'] ?? []), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) ?>,
+            <?php /* The template list has to match the page: a movie id in a TV
+                     template ("…/tv/550/1/1") silently resolves to nothing. */ ?>
+            embedTemplates: <?= json_encode(array_map(
+                fn($p) => ['label' => $p['label'] ?? '', 'url' => $p['url'] ?? ''],
+                $is_tmdb_movie ? ($GLOBALS['MOVIE_EMBED_PROVIDERS'] ?? []) : ($GLOBALS['TV_EMBED_PROVIDERS'] ?? [])
+            ), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) ?>,
+            // Settings > Preferences (header.php loads $kp_settings for the
+            // signed-in user; the default keeps auto-play on when it is absent).
+            autoplayNext: <?= !empty($kp_settings['autoplay']) ? 'true' : 'false' ?>,
             season: <?= $season_id ? (int)$season_id : '1' ?>,
             currentSeason: <?= $season_id ? (int)$season_id : '1' ?>,
             kpSeason: <?= (int)$kp_season ?>,
@@ -1217,6 +1245,44 @@ include_once './includes/header.php';
         let lastSavedAt = 0;
         const resumeCache = {};
 
+        // ─── Episode keys ────────────────────────────────────────────
+        // TMDB TV restarts episode numbers at 1 in every season, so resume
+        // points, watch history and notes have to be stored against a
+        // season-aware number or S2E2 and S1E2 would share one row. The key is
+        // built the same way includes/progress.php builds it:
+        // (season - 1) * 10000 + episode. Season 1 keeps the plain episode
+        // number, and every other provider is untouched.
+        const TV_STRIDE = 10000;
+        function epKey(ep) {
+            if (!KP.isTmdbTv) return parseInt(ep, 10) || 0;
+            return ((KP.currentSeason || 1) - 1) * TV_STRIDE + (parseInt(ep, 10) || 0);
+        }
+        /** Plain episode number behind a stored key — null when it is another season's. */
+        function localEp(key) {
+            const k = parseInt(key, 10) || 0;
+            if (!KP.isTmdbTv) return k;
+            const season = Math.floor((k - 1) / TV_STRIDE) + 1;
+            if (season !== (KP.currentSeason || 1)) return null;
+            return k - (season - 1) * TV_STRIDE;
+        }
+
+        // ─── Remembered embed server (TMDB movies & series) ───────────
+        // Whichever chip the viewer picks is stored per title, so the next
+        // visit — and every other episode or season of the same title — opens
+        // with the mirror that actually worked for them. Kept in localStorage:
+        // it is a per-device playback preference, not account data.
+        const SERVER_MEMO_PREFIX = 'kp_server_';
+        function serverMemoKey() { return SERVER_MEMO_PREFIX + (KP.catalogId || KP.id || ''); }
+        function isEmbedPage() { return !!(KP.isTmdbMovie || KP.isTmdbTv); }
+        function rememberServer(key) {
+            if (!key || !isEmbedPage()) return;
+            try { localStorage.setItem(serverMemoKey(), String(key)); } catch (e) { /* private mode */ }
+        }
+        function rememberedServer() {
+            if (!isEmbedPage()) return '';
+            try { return localStorage.getItem(serverMemoKey()) || ''; } catch (e) { return ''; }
+        }
+
         // ─── Watch-time clock ────────────────────────────────────────
         // Embed players are cross-origin: their playhead is unreadable, so
         // "how long was this actually playing" is measured here and reported
@@ -1248,6 +1314,8 @@ include_once './includes/header.php';
             return (Date.now() - lastUserActivity) < IDLE_TIMEOUT_MS;
         }
 
+        // KP.resume.episode is the *stored* key (season-aware for TMDB TV), so
+        // it can be cached as-is.
         if (KP.resume && KP.resume.episode) {
             resumeCache[KP.resume.episode] = KP.resume.position || 0;
         }
@@ -1311,16 +1379,17 @@ include_once './includes/header.php';
         }
 
         // ─── Progress (resume + save) ───────────────────────────────
-        function progressVideoId(ep) { return KP.id + ':' + ep; }
+        function progressVideoId(ep) { return KP.id + ':' + epKey(ep); }
 
         function loadProgress(ep) {
             if (!KP.userId) return Promise.resolve(0);
-            if (typeof resumeCache[ep] === 'number') return Promise.resolve(resumeCache[ep]);
-            return fetch('./includes/get_progress.php?video_id=' + encodeURIComponent(progressVideoId(ep)))
+            const key = epKey(ep);
+            if (typeof resumeCache[key] === 'number') return Promise.resolve(resumeCache[key]);
+            return fetch('./includes/get_progress.php?video_id=' + encodeURIComponent(KP.id + ':' + key))
                 .then((r) => r.json())
                 .then((d) => {
                     const pos = (d && typeof d.position === 'number') ? d.position : 0;
-                    resumeCache[ep] = pos;
+                    resumeCache[key] = pos;
                     return pos;
                 })
                 .catch(() => 0);
@@ -1384,7 +1453,7 @@ include_once './includes/header.php';
                 // User is idle — don't add to watch time, but still save position
                 sentPlaySeconds += delta;
                 lastSavedAt = position;
-                resumeCache[ep] = position;
+                resumeCache[epKey(ep)] = position;
                 // Send position-only heartbeat (watched_seconds=0)
                 const bodyPos = 'video_id=' + encodeURIComponent(progressVideoId(ep))
                            + '&last_position=' + encodeURIComponent(position.toFixed(2))
@@ -1411,7 +1480,7 @@ include_once './includes/header.php';
 
             sentPlaySeconds += delta;
             lastSavedAt = position;
-            resumeCache[ep] = position;
+            resumeCache[epKey(ep)] = position;
             markEpisodeProgress(ep, position);
 
             const body = 'video_id=' + encodeURIComponent(progressVideoId(ep))
@@ -1556,9 +1625,13 @@ include_once './includes/header.php';
             nextOverlay.style.display = 'flex';
             nextCancelled = false;
 
+            // "Auto-play Next" (Settings tab) decides whether the countdown is
+            // allowed to jump to the next episode on its own.
+            var autoplayNext = KP.autoplayNext !== false;
             var remaining = 5;
-            if (nextCount) nextCount.textContent = remaining;
+            if (nextCount) nextCount.textContent = autoplayNext ? remaining : '';
             nextBar.style.transition = 'none';
+            nextBar.style.width = autoplayNext ? '100%' : '0%';
 
             nextPlayBtn.onclick = function () {
                 clearInterval(nextTimer);
@@ -1569,6 +1642,8 @@ include_once './includes/header.php';
                 clearInterval(nextTimer);
                 nextOverlay.style.display = 'none';
             };
+
+            if (!autoplayNext) return;   // overlay stays open until the viewer chooses
 
             // Start countdown
             nextTimer = setInterval(function () {
@@ -1904,12 +1979,20 @@ include_once './includes/header.php';
             lbl.innerHTML = '<i class="fas fa-server"></i> সার্ভার';
             chipsEl.appendChild(lbl);
 
+            var wanted       = rememberedServer();
+            var rememberedBtn = null;
+            var rememberedHit = null;
+
             filtered.forEach(function (server) {
                 var btn = document.createElement('button');
                 btn.className = 'server-chip';
                 btn.dataset.key = server.key;
                 var langTag = (!server.lang || server.lang === 'any') ? '' : ' [' + server.lang.toUpperCase() + ']';
                 btn.textContent = (server.label || server.key || 'HD').replace(/ · /g, ' ') + langTag;
+                if (wanted && server.key === wanted) {
+                    rememberedBtn = btn;
+                    rememberedHit = server;
+                }
                 btn.addEventListener('click', function () {
                     document.querySelectorAll('.server-chip').forEach(function (b) {
                         b.classList.remove('active');
@@ -1920,8 +2003,18 @@ include_once './includes/header.php';
                 chipsEl.appendChild(btn);
             });
 
-            var first = chipsEl.querySelector('.server-chip');
-            if (first) first.classList.add('active');
+            if (rememberedBtn) {
+                // This title still offers the server the viewer chose last time,
+                // so start there instead of the first mirror in the list.
+                rememberedBtn.classList.add('active');
+                if (rememberedHit && payload && payload.ok) {
+                    payload.url    = rememberedHit.url;
+                    payload.source = 'embed:' + (rememberedHit.key || '');
+                }
+            } else {
+                var first = chipsEl.querySelector('.server-chip');
+                if (first) first.classList.add('active');
+            }
         }
 
         function renderLangToggle() {
@@ -1960,13 +2053,15 @@ include_once './includes/header.php';
 
         function useServer(server) {
             if (!server) return;
+            // An explicit pick is what gets remembered for this title.
+            rememberServer(server.key);
 
             if (server.mode === 'embed') {
                 playEmbed(server.url);
                 return;
             }
 
-            const resumeAt = wantResume ? (resumeCache[currentEp] || 0) : 0;
+            const resumeAt = wantResume ? (resumeCache[epKey(currentEp)] || 0) : 0;
             // Servers we already know the metadata for keep their subtitles and
             // chapter markers; anything else plays bare.
             const isCurrent = !!(payload && payload.url === server.url);
@@ -2000,7 +2095,7 @@ include_once './includes/header.php';
 
         // ─── Gate content ───────────────────────────────────────────
         function resumeTargetFor(ep) {
-            const pos = resumeCache[ep];
+            const pos = resumeCache[epKey(ep)];
             if (ep !== currentEp) return 0;
             return (typeof pos === 'number' && pos > 10) ? pos : 0;
         }
@@ -2019,7 +2114,12 @@ include_once './includes/header.php';
                 if (KP.isTmdbMovie) {
                     gateEpEl.textContent = 'Watch Movie';
                 } else if (KP.isTmdbTv) {
-                    gateEpEl.textContent = 'Season ' + KP.currentSeason + ' · Episode ' + currentEp + (KP.total ? ' of ' + KP.total : '');
+                    // Episodes of *this* season, not the series total (KP.total).
+                    var seasonEps = (KP.episodes || []).filter(function (e) {
+                        return (e.s || 1) === KP.currentSeason;
+                    });
+                    gateEpEl.textContent = 'Season ' + KP.currentSeason + ' · Episode ' + currentEp
+                        + (seasonEps.length ? ' of ' + seasonEps.length : '');
                 } else if (KP.kpSeason > 0 && meta && meta.dn != null) {
                     gateEpEl.textContent = 'Episode ' + showNum + (KP.total ? ' of ' + KP.total : '');
                 } else {
@@ -2062,7 +2162,7 @@ include_once './includes/header.php';
         /** Fill in the resume affordance for an episode we have not loaded yet. */
         function refreshResume(ep) {
             loadProgress(ep).then(function (pos) {
-                resumeCache[ep] = pos;
+                resumeCache[epKey(ep)] = pos;
                 if (ep === currentEp) updateGate();
             });
         }
@@ -2084,7 +2184,7 @@ include_once './includes/header.php';
 
             currentEp = ep;
             payload = null;
-            resetWatchClock(resumeCache[ep] || 0);
+            resetWatchClock(resumeCache[epKey(ep)] || 0);
 
             if (autoplay) {
                 setState('loading', { message: 'EP ' + ep + ' এর সোর্স খোঁজা হচ্ছে…' });
@@ -2211,7 +2311,7 @@ include_once './includes/header.php';
             saveHistory(currentEp);
 
             if (payload.mode === 'hls') {
-                const resumeAt = wantResume ? (resumeCache[currentEp] || 0) : 0;
+                const resumeAt = wantResume ? (resumeCache[epKey(currentEp)] || 0) : 0;
                 playHls(payload.url, payload.subtitles || [], payload.intro, payload.outro, resumeAt);
             } else {
                 playEmbed(payload.url);
@@ -2223,7 +2323,7 @@ include_once './includes/header.php';
             fetch('./includes/save_watch_history.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: 'anime_slug=' + encodeURIComponent(KP.catalogId) + '&episode_number=' + encodeURIComponent(ep)
+                body: 'anime_slug=' + encodeURIComponent(KP.catalogId) + '&episode_number=' + encodeURIComponent(epKey(ep))
             }).catch(function () {});
             /* Count view once per page load */
             if (!window._kpViewCounted) {
@@ -2243,6 +2343,9 @@ include_once './includes/header.php';
             if (el) el.classList.add('active-play');
 
             const url = new URL(window.location.href);
+            // The season has to travel with the episode, otherwise a refresh (or
+            // a shared link) drops the viewer back into season 1.
+            if (KP.isTmdbTv) url.searchParams.set('season', KP.currentSeason || 1);
             url.searchParams.set('ep', ep);
             url.searchParams.set('lang', currentMode || currentLang);
             history.replaceState({}, '', url.toString());
@@ -2353,9 +2456,13 @@ include_once './includes/header.php';
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
                     const map = (data && data.progress) || {};
-                    Object.keys(map).forEach(function (ep) {
-                        const pos = Number(map[ep]) || 0;
-                        resumeCache[ep] = pos;
+                    Object.keys(map).forEach(function (stored) {
+                        const pos = Number(map[stored]) || 0;
+                        // Keys come back as stored numbers; only this season's
+                        // rows belong on the episode list that is on screen.
+                        const ep = localEp(stored);
+                        if (ep === null) return;
+                        resumeCache[stored] = pos;
                         markEpisodeProgress(ep, pos);
                     });
                 })
@@ -2387,8 +2494,10 @@ include_once './includes/header.php';
             filtered.forEach(function (ep) { frag.appendChild(episodeElement(ep)); });
             container.appendChild(frag);
 
-            Object.keys(resumeCache).forEach(function (ep) {
-                markEpisodeProgress(ep, resumeCache[ep]);
+            Object.keys(resumeCache).forEach(function (stored) {
+                const ep = localEp(stored);
+                if (ep === null) return;
+                markEpisodeProgress(ep, resumeCache[stored]);
             });
 
             const active = container.querySelector('.episode.active-play');
@@ -2479,7 +2588,7 @@ include_once './includes/header.php';
         const noteInput = document.getElementById('note-input');
         const noteSave  = document.getElementById('note-save-btn');
 
-        function notesVideoId(ep) { return KP.id + ':' + ep; }
+        function notesVideoId(ep) { return KP.id + ':' + epKey(ep); }
 
         function noteTimeLabel(sec) {
             sec = Math.max(0, Math.floor(Number(sec) || 0));

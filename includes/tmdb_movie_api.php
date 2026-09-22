@@ -171,6 +171,9 @@ function tmdb_tv_normalize($m) {
         'episodes_list'   => [],
         'external_links'  => [],
         'next_airing'     => null,
+        // Newest aired episode as reported by TMDB — lets the notification
+        // check spot a new episode without a request per season.
+        'last_episode_to_air' => $m['last_episode_to_air'] ?? null,
         'trailer'         => null,
         'is_adult'        => !empty($m['adult']),
         'has_dub'         => false,
@@ -524,7 +527,9 @@ function tmdb_tv_detail($id) {
     $id = (int)$id;
     if ($id <= 0) return null;
 
-    $key = api_cache_key('tmdb_tv', ['detail:v2', $id]);
+    // v3: the cached payload gained last_episode_to_air (the notification check
+    // reads it), so older entries have to be refetched once.
+    $key = api_cache_key('tmdb_tv', ['detail:v3', $id]);
     $hit = api_cache_get($key);
     if (is_array($hit)) return $hit;
 

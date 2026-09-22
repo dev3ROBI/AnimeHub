@@ -1,5 +1,84 @@
 // user/js/settings.js — settings tab behaviour
 (function(){
+    // ─── Account forms (display name / password) ────────────────────
+    function accountMessage(form, text, type) {
+        var box = form.querySelector('[data-kp-account-msg]');
+        if (!box) return;
+        box.textContent = text || '';
+        box.className = 'kp-account-msg' + (type ? ' is-' + type : '');
+    }
+
+    document.querySelectorAll('[data-kp-account]').forEach(function(form){
+        var action = form.dataset.kpAccount;
+        var button = form.querySelector('.kp-account-save');
+
+        form.addEventListener('submit', function(e){
+            e.preventDefault();
+            if (button && button.disabled) return;
+
+            var field = function (name) {
+                var el = form.querySelector('[name="' + name + '"]');
+                return el ? el.value : '';
+            };
+
+            var payload = { action: action };
+            if (action === 'name') {
+                payload.name = field('name').trim();
+                if (payload.name.length < 3) {
+                    accountMessage(form, 'Please use at least 3 characters.', 'error');
+                    return;
+                }
+            } else {
+                payload.current_password = field('current_password');
+                payload.new_password     = field('new_password');
+                payload.confirm_password = field('confirm_password');
+                if (payload.new_password !== payload.confirm_password) {
+                    accountMessage(form, 'The new passwords do not match.', 'error');
+                    return;
+                }
+                if (payload.new_password.length < 8) {
+                    accountMessage(form, 'Use at least 8 characters.', 'error');
+                    return;
+                }
+            }
+
+            if (button) button.disabled = true;
+            accountMessage(form, 'Saving…');
+
+            fetch('includes/update_account.php', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            })
+                .then(function(r){ return r.json(); })
+                .then(function(d){
+                    if (!d || !d.ok) throw new Error((d && d.message) || 'Could not save');
+
+                    if (action === 'name') {
+                        // Keep the live page in step with the new name.
+                        document.querySelectorAll('.kp-user-name, [data-kp-user-name]').forEach(function(el){
+                            el.textContent = d.name;
+                        });
+                        var nameInput = form.querySelector('[name="name"]');
+                        if (nameInput) nameInput.value = d.name;
+                    } else {
+                        form.reset();
+                    }
+
+                    accountMessage(form, action === 'name' ? 'Name updated.' : 'Password updated.', 'ok');
+                    if (typeof kpToast === 'function') {
+                        kpToast(action === 'name' ? 'Display name updated' : 'Password updated', 'success');
+                    }
+                })
+                .catch(function(err){
+                    accountMessage(form, err.message || 'Could not save', 'error');
+                })
+                .finally(function(){
+                    if (button) button.disabled = false;
+                });
+        });
+    });
+
     document.querySelectorAll('[data-setting]').forEach(function(input){
         input.addEventListener('change', function(){
             var key = this.dataset.setting;
@@ -16,6 +95,9 @@
                     }
                     if (key === 'sticky_navbar') {
                         document.body.classList.toggle('sticky-nav-enabled', !!value);
+                    }
+                    if (key === 'show_ratings') {
+                        document.body.classList.toggle('ratings-hidden', !value);
                     }
                 } else {
                     if (typeof kpToast === 'function') kpToast('Failed: ' + (d.message || 'Unknown'), 'error');

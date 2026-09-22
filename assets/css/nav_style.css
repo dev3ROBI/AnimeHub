@@ -142,38 +142,36 @@ body.sticky-nav-enabled .navbar.scrolled {
   transform: scale(1.06);
 }
 
-/* Drawer Menu */
+/*
+ * Drawer menu.
+ *
+ * It hangs from the navbar instead of covering it: header.php measures the
+ * navbar and writes the offset into --kp-drawer-top, so the panel starts right
+ * under the bar (and can never hide it, whatever the navbar's height is).
+ * No logo and no close button — the hamburger above, the scrim, and Esc all
+ * close it.
+ */
 .drawer {
   position: fixed;
-  top: 0;
+  top: var(--kp-drawer-top, 0px);
   left: -300px;
   width: 270px;
-  height: 100%;
+  height: calc(100vh - var(--kp-drawer-top, 0px));
+  height: calc(100dvh - var(--kp-drawer-top, 0px));
   background: rgba(22, 22, 28, 0.97);
   backdrop-filter: blur(16px);
-  padding: 0 0 20px;
+  padding: 10px 0 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 0 16px 16px 0;
   transition: left 0.3s ease;
   box-shadow: 2px 0 16px rgba(0, 0, 0, 0.5);
-  z-index: 999;
+  /* Above the navbar (1000) so the rounded corner is not clipped by it. */
+  z-index: 1100;
   overflow-y: auto;
 }
 
 .drawer.active {
   left: 0;
-}
-
-.drawer-header {
-  padding: 20px 22px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  margin-bottom: 6px;
-}
-
-.drawer-logo {
-  font-size: 24px;
-  font-family: 'Tangerine', serif;
-  font-weight: bold;
-  color: #ff2e63;
-  text-shadow: 0 0 10px rgba(255, 46, 99, 0.4);
 }
 
 .drawer h2 {
@@ -952,6 +950,13 @@ body.sticky-nav-enabled .navbar.scrolled {
   gap: 1px;
 }
 
+.kp-user-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .kp-user-name {
   font-size: 13px;
   font-weight: 600;
@@ -959,6 +964,29 @@ body.sticky-nav-enabled .navbar.scrolled {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* Rank badge next to the name in the user dropdown (colours are inline). */
+/* Deliberately tiny: it is a tag next to the name, not a second title. */
+.kp-user-rank {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid;
+  font-size: 8px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.kp-user-rank i {
+  font-size: 7px;
 }
 
 .kp-user-email {
@@ -1063,16 +1091,12 @@ body.sticky-nav-enabled .navbar.scrolled {
   box-shadow: 0 6px 20px rgba(255, 46, 99, 0.4);
 }
 
-@media (max-width: 768px) {
-  .floating-popup {
-    min-width: 90vw !important;
-    max-width: 90vw !important;
-    left: 50% !important;
-    right: auto !important;
-    top: 100% !important;
-    transform: translate(-50%, 10px) !important;
-  }
-}
+/*
+ * The phone layout for the floating popups and the drawer lives in one block at
+ * the end of this file ("Navbar UI on phones") so it can be read in one place.
+ * It used to be a 90vw popup centred on its icon, which pushed the panel off
+ * the right edge whenever the icon sat near the screen edge.
+ */
 
 /* ======================= End of Floating Popups ======================= */
 
@@ -1223,14 +1247,6 @@ body.sticky-nav-enabled .navbar.scrolled {
 
 [data-theme="light"] .drawer {
   background-color: #fff;
-}
-
-[data-theme="light"] .drawer-header {
-  border-bottom-color: rgba(0, 0, 0, 0.06);
-}
-
-[data-theme="light"] .drawer-logo {
-  color: #ff2e63;
 }
 
 [data-theme="light"] .drawer ul li {
@@ -1593,3 +1609,126 @@ body.sticky-nav-enabled .navbar.scrolled {
 [data-theme="light"] .kp-quick-stats .kp-qstat-num { color: #1a1a1a; }
 [data-theme="light"] .kp-genre-chip { background: rgba(0,0,0,0.04); border-color: rgba(0,0,0,0.08); color: #555; }
 [data-theme="light"] .kp-genre-chip:hover { background: #ff2e63; color: #fff; }
+
+/* ============================================================
+   Navbar UI on phones  (search · notifications · profile · drawer)
+   ------------------------------------------------------------
+   Below 768px each panel becomes a centred, near-full-width sheet: anchored to
+   the viewport instead of the icon (so no safe-area gutter can push it off the
+   edge), scrollable internally, with finger-sized rows.
+
+   The rules carry !important on purpose: header.php writes the desktop
+   anchoring as inline styles, and the sheet layout must win over those.
+   ============================================================ */
+
+@media (max-width: 768px) {
+  /* --- Floating popups ------------------------------------------------ */
+  /*
+   * Viewport-anchored and centred. Chaining the sheet to the icon (the desktop
+   * shape) means knowing the navbar's side gutter, and with a safe-area/notch
+   * inset that gutter grows — which is what pushed the panel off the left edge.
+   * Centring removes the gutter from the equation entirely; header.php only
+   * supplies the vertical offset.
+   */
+  .floating-popup {
+    position: fixed !important;
+    top: 64px !important; /* fallback for the no-JS case */
+    left: 50% !important;
+    right: auto !important;
+    width: calc(100% - 24px) !important;
+    min-width: 0 !important;
+    max-width: 420px !important;
+    max-height: calc(100vh - 92px) !important;
+    max-height: calc(100dvh - 92px) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    border-radius: 14px !important;
+    /* `top` is written at open time, so it must not be animated. */
+    transition: opacity 0.22s ease, transform 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    transform: translate(-50%, -10px) scale(0.98) !important;
+  }
+
+  .floating-popup.active {
+    transform: translate(-50%, 0) scale(1) !important;
+  }
+
+  .floating-popup > .kp-search-head,
+  .floating-popup > .kp-notif-head,
+  .floating-popup > .kp-user-header {
+    flex: 0 0 auto;
+  }
+
+  /* The list takes whatever height is left and scrolls on its own. */
+  .floating-popup .search-suggestions,
+  .floating-popup .kp-notif-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* No physical keyboard on a phone, and the panel itself may need to scroll
+     on a short/landscape screen. */
+  .kp-search-kbd { display: none; }
+  .kp-user-popup {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  /* --- Finger-sized rows ---------------------------------------------- */
+  .kp-notif-item {
+    align-items: center;
+    padding: 13px 12px;
+  }
+
+  .kp-notif-icon {
+    width: 38px;
+    height: 38px;
+  }
+
+  /* Dismiss is hover-only on desktop, which a touch screen cannot do. */
+  .kp-notif-delete {
+    display: flex;
+    opacity: 1;
+    width: 30px;
+    height: 30px;
+    background: rgba(255, 71, 87, 0.16);
+  }
+
+  .kp-user-header { padding: 14px; }
+  .kp-user-popup ul li { padding: 13px 12px; }
+
+  .kp-sug { padding: 9px 8px; }
+  .kp-sug img { width: 38px; height: 56px; }
+
+  /* --- Drawer --------------------------------------------------------- */
+  /* body prefix so these beat the small-screen rules in home.css. */
+  body .drawer {
+    width: min(84vw, 320px);
+    left: calc(0px - min(84vw, 320px) - 16px);
+    padding-bottom: calc(18px + env(safe-area-inset-bottom));
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  body .drawer.active { left: 0; }
+
+  /* Dividers are <li>s too — they must keep their 1px hairline. */
+  body .drawer ul li:not(.drawer-divider) {
+    min-height: 46px;
+    padding: 13px 14px;
+  }
+
+  /* Touch has no hover, so the desktop "slide right" just wastes a frame. */
+  body .drawer ul li:hover { padding-left: 14px; }
+
+}
+
+/* Very short screens (landscape phones): keep the panel above the fold. */
+@media (max-width: 768px) and (max-height: 480px) {
+  .floating-popup {
+    max-height: calc(100vh - 76px) !important;
+    max-height: calc(100dvh - 76px) !important;
+  }
+}

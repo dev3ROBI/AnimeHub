@@ -19,6 +19,57 @@ function progress_video_id($animeId, $episode) {
     return (string)$animeId . ':' . (int)$episode;
 }
 
+// ─── TMDB TV: one stored episode number per (season, episode) ──────────
+//
+// TMDB restarts episode numbers at 1 in every season, so a plain "episode 2"
+// would make S2E2 and S1E2 the same row in watch_history, watch_time and
+// video_progress — one resume bar, one watched-episode count, one continue
+// watching card for two different episodes. Folding the season into the number
+// keeps every one of those tables keyed per episode. Season 1 keeps the plain
+// number, so rows written before this existed stay valid.
+if (!defined('KP_TV_SEASON_STRIDE')) define('KP_TV_SEASON_STRIDE', 10000);
+
+/** Is this catalogue id a TMDB TV show (the only provider with per-season numbering)? */
+function progress_is_tv_slug($animeId) {
+    return (bool)preg_match('/^tmdb:tv:\d+$/', (string)$animeId);
+}
+
+/** Stored episode number for a TMDB TV episode: (season - 1) * stride + episode. */
+function progress_tv_episode_key($season, $episode) {
+    $season  = max(1, (int)$season);
+    $episode = max(1, (int)$episode);
+    return ($season - 1) * KP_TV_SEASON_STRIDE + $episode;
+}
+
+/**
+ * Stored episode number for any catalogue item. Non-TV ids keep their plain
+ * episode number; TMDB TV folds the season in when one is known.
+ */
+function progress_episode_key($animeId, $episode, $season = 0) {
+    if ($season > 0 && progress_is_tv_slug($animeId)) {
+        return progress_tv_episode_key($season, $episode);
+    }
+    return (int)$episode;
+}
+
+/** Season a stored episode number belongs to. 0 when the id is not TMDB TV. */
+function progress_stored_season($animeId, $storedEpisode) {
+    if (!progress_is_tv_slug($animeId)) return 0;
+    $stored = max(1, (int)$storedEpisode);
+    return intdiv($stored - 1, KP_TV_SEASON_STRIDE) + 1;
+}
+
+/** Plain ("Season 3, Episode 4") numbers behind a stored episode number. */
+function progress_split_episode_key($animeId, $storedEpisode) {
+    $stored  = max(1, (int)$storedEpisode);
+    $season  = progress_stored_season($animeId, $stored);
+    if ($season === 0) return ['season' => 0, 'episode' => $stored];
+    return [
+        'season'  => $season,
+        'episode' => $stored - ($season - 1) * KP_TV_SEASON_STRIDE,
+    ];
+}
+
 /** Saved position in seconds for one episode, 0 when unknown. */
 function progress_get($user_id, $animeId, $episode) {
     global $pdo;
@@ -98,15 +149,22 @@ function progress_last_episode($user_id, $animeId, $maxEpisodes = 0) {
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$row) return null;
 
+        // The stored number already identifies the season for TMDB TV, so the
+        // series-wide episode total must not be used to clamp it.
         $episode = (int)$row['episode_number'];
-        if ($maxEpisodes > 0 && $episode > $maxEpisodes) {
+        $stored  = progress_is_tv_slug($animeId);
+        if (!$stored && $maxEpisodes > 0 && $episode > $maxEpisodes) {
             $episode = $maxEpisodes;
         }
 
+        $split = progress_split_episode_key($animeId, $episode);
+
         return [
-            'episode'  => $episode,
-            'position' => progress_get($user_id, $animeId, $episode),
-            'watched_at' => $row['watched_at'],
+            'episode'        => $episode,
+            'episode_number' => $split['episode'],
+            'season'         => $split['season'],
+            'position'       => progress_get($user_id, $animeId, $episode),
+            'watched_at'     => $row['watched_at'],
         ];
     } catch (Exception $e) {
         return null;

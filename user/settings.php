@@ -30,10 +30,19 @@ $settings = kp_user_settings($pdo, $userID);
                     <h4>Account</h4>
                 </div>
                 <div class="kp-settings-card-body">
-                    <div class="kp-settings-row">
-                        <span class="kp-settings-label"><i class="fas fa-id-badge"></i> Username</span>
-                        <span class="kp-settings-value"><?= htmlspecialchars($user['User_Name']) ?></span>
-                    </div>
+                    <form class="kp-account-form" data-kp-account="name" autocomplete="off">
+                        <label class="kp-account-field">
+                            <span><i class="fas fa-id-badge"></i> Display name</span>
+                            <input type="text" name="name" value="<?= htmlspecialchars($user['User_Name']) ?>"
+                                   minlength="3" maxlength="40" required autocomplete="nickname">
+                        </label>
+                        <p class="kp-account-hint">Shown on your profile and next to your reviews.</p>
+                        <button type="submit" class="kp-account-save">
+                            <i class="fas fa-check"></i> Save name
+                        </button>
+                        <p class="kp-account-msg" data-kp-account-msg role="status"></p>
+                    </form>
+
                     <div class="kp-settings-row">
                         <span class="kp-settings-label"><i class="fas fa-envelope"></i> Email</span>
                         <span class="kp-settings-value"><?= htmlspecialchars($user['User_Email']) ?></span>
@@ -99,10 +108,26 @@ $settings = kp_user_settings($pdo, $userID);
                     <h4>Security</h4>
                 </div>
                 <div class="kp-settings-card-body">
-                    <div class="kp-settings-row">
-                        <span class="kp-settings-label"><i class="fas fa-lock"></i> Password</span>
-                        <span class="kp-settings-value">bcrypt hashed</span>
-                    </div>
+                    <form class="kp-account-form" data-kp-account="password" autocomplete="off">
+                        <label class="kp-account-field">
+                            <span><i class="fas fa-lock"></i> Current password</span>
+                            <input type="password" name="current_password" required autocomplete="current-password">
+                        </label>
+                        <label class="kp-account-field">
+                            <span><i class="fas fa-key"></i> New password</span>
+                            <input type="password" name="new_password" minlength="8" required autocomplete="new-password">
+                        </label>
+                        <label class="kp-account-field">
+                            <span><i class="fas fa-key"></i> Confirm new password</span>
+                            <input type="password" name="confirm_password" minlength="8" required autocomplete="new-password">
+                        </label>
+                        <p class="kp-account-hint">At least 8 characters. Passwords are stored hashed — nobody can read them back.</p>
+                        <button type="submit" class="kp-account-save">
+                            <i class="fas fa-shield-halved"></i> Update password
+                        </button>
+                        <p class="kp-account-msg" data-kp-account-msg role="status"></p>
+                    </form>
+
                     <div class="kp-settings-row">
                         <span class="kp-settings-label"><i class="fas fa-eraser"></i> History</span>
                         <span class="kp-settings-value">Saved locally</span>

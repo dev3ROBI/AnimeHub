@@ -61,24 +61,60 @@ try {
         $info = catalog_info($animeId);
         if (!$info) continue;
 
-        $episode  = (int)$row['episode_number'];
+        // watch_history stores a season-aware number for TMDB TV (see
+        // progress_episode_key()), which is the handle every lookup needs;
+        // the split gives back the plain "season + episode" for the card.
+        $storedEpisode = (int)$row['episode_number'];
+        $split         = progress_split_episode_key($animeId, $storedEpisode);
+        $episode       = $split['episode'];
+        $season        = $split['season'];
+
         // Resume point from video_progress, runtime + watched seconds from
         // watch_time (the player's own reading of the file).
-        $state    = progress_card_seconds($user_id, $animeId, $episode, $info);
+        $state    = progress_card_seconds($user_id, $animeId, $storedEpisode, $info);
         // Embeds cannot report a position, so the tracked seconds are the only
         // evidence of progress — the card shows the furthest of the two.
         $position = $state['progress'];
         $total    = (int)max($info['episodes'] ?? 0, $info['aired_episodes'] ?? 0);
 
-        $nextEp = ($total === 0 || $episode < $total) ? $episode + 1 : null;
+        // Per-season episode counts, so the next episode rolls into the next
+        // season instead of offering "S2 E9" on an eight-episode season.
+        $seasonTotal = 0;
+        if ($season > 0 && !empty($info['episodes_list'])) {
+            foreach ($info['episodes_list'] as $epRow) {
+                if ((int)($epRow['season'] ?? 1) === $season) $seasonTotal++;
+            }
+        }
+
+        $nextEp     = null;
+        $nextSeason = $season;
+        if ($seasonTotal > 0) {
+            if ($episode < $seasonTotal) {
+                $nextEp = $episode + 1;
+            } else {
+                foreach ($info['episodes_list'] as $epRow) {
+                    if ((int)($epRow['season'] ?? 1) === $season + 1 && (int)($epRow['number'] ?? 0) === 1) {
+                        $nextEp     = 1;
+                        $nextSeason = $season + 1;
+                        break;
+                    }
+                }
+            }
+        } elseif ($total === 0 || $episode < $total) {
+            $nextEp = $episode + 1;
+        }
 
         $continue_watching[] = [
             'type'              => 'anime',
             'provider'          => $info['provider'] ?? null,
             'video_id'          => $animeId,
-            'url'               => './watch.php?id=' . urlencode($animeId) . '&ep=' . $episode,
+            'url'               => './watch.php?id=' . urlencode($animeId)
+                                    . ($season > 0 ? '&season=' . $season : '')
+                                    . '&ep=' . $episode,
             'next_url'          => $nextEp
-                ? './watch.php?id=' . urlencode($animeId) . '&ep=' . $nextEp
+                ? './watch.php?id=' . urlencode($animeId)
+                    . ($nextSeason > 0 ? '&season=' . $nextSeason : '')
+                    . '&ep=' . $nextEp
                 : null,
             'title'             => $info['title'] ?? 'Unknown',
             'poster'            => $info['poster'] ?? './uploads/thumbnails/default.png',
@@ -89,7 +125,7 @@ try {
             'episode_number'    => $episode,
             'next_episode'      => $nextEp,
             'total_episodes'    => $total,
-            'season_number'     => null,
+            'season_number'     => $season > 0 ? $season : null,
             'season_id'         => null,
             'episode_id'        => null,
             'show_imdb_id'      => $animeId,

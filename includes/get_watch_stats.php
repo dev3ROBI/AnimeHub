@@ -19,7 +19,8 @@
  *   heatmap                       { 'YYYY-MM-DD': seconds } for 30 days
  *   heatmap_episodes              { 'YYYY-MM-DD': episode count }
  *   top_anime                     [{ slug, title, poster, seconds, time, episodes }]
- *   top_genres, weekly_pattern
+ *   top_genres                    [{ name, seconds, episodes, share }], time weighted
+ *   weekly_pattern, weekly_unit   weekday buckets + the unit they are in
  */
 session_start();
 
@@ -138,29 +139,80 @@ foreach (watch_time_top_anime($user_id, 6) as $row) {
     ];
 }
 
-// ─── Most watched genres ─────────────────────────────────────────────
+// ─── Most watched genres (weighted by real watch time) ───────────────
+//
+// Counting history rows ranks whatever has the most episodes; the seconds
+// table says what was actually watched. Only the titles holding most of the
+// time are resolved — catalogue lookups are cache-first, but capping the
+// sample keeps this a bounded number of them however long the history is.
 $topGenres = [];
+$genreBasis = 0;
+$genreByTime = $totalSeconds > 0;
 try {
-    $stmt = $pdo->prepare("SELECT anime_slug FROM watch_history WHERE user_id = ? ORDER BY watched_at DESC LIMIT 50");
-    $stmt->execute([$user_id]);
+    $weights = watch_time_anime_map($user_id); // slug => [seconds, episodes]
 
-    $genreCounts = [];
-    foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $slug) {
+    // Titles opened but not tracked yet (fresh accounts have history first).
+    $stmt = $pdo->prepare("
+        SELECT anime_slug, COUNT(*) AS episodes
+          FROM watch_history
+         WHERE user_id = ?
+         GROUP BY anime_slug
+         ORDER BY MAX(watched_at) DESC
+         LIMIT 12
+    ");
+    $stmt->execute([$user_id]);
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $slug = (string)($row['anime_slug'] ?? '');
+        if ($slug === '' || isset($weights[$slug])) continue;
+        $weights[$slug] = ['seconds' => 0, 'episodes' => (int)($row['episodes'] ?? 0)];
+    }
+
+    // Heaviest first, then only the top handful reach the catalogue.
+    uasort($weights, static fn($a, $b) => ($b['seconds'] ?: $b['episodes']) <=> ($a['seconds'] ?: $a['episodes']));
+    $sample = array_slice($weights, 0, 12, true);
+
+    $genreSeconds  = [];
+    $genreEpisodes = [];
+    foreach ($sample as $slug => $agg) {
+        // Legacy rows have episodes but no tracked seconds yet.
+        $weight = $genreByTime ? (float)$agg['seconds'] : (float)$agg['episodes'];
+        if ($weight <= 0) continue;
+
         $info = catalog_info($slug);
         if (!$info) continue;
-        foreach ((array)($info['genres'] ?? []) as $g) {
-            $g = trim((string)$g);
-            if ($g !== '') $genreCounts[$g] = ($genreCounts[$g] ?? 0) + 1;
+
+        $genres = array_values(array_unique(array_filter(array_map('trim', (array)($info['genres'] ?? [])))));
+        if (!$genres) continue;
+
+        $genreBasis++;
+        foreach ($genres as $g) {
+            // A title's weight is split across its genres, so the totals still
+            // add up to what was watched instead of double counting it.
+            $genreSeconds[$g]  = ($genreSeconds[$g] ?? 0) + ($weight / count($genres));
+            $genreEpisodes[$g] = ($genreEpisodes[$g] ?? 0) + (int)$agg['episodes'];
         }
     }
-    arsort($genreCounts);
-    $topGenres = array_slice($genreCounts, 0, 8, true);
+
+    arsort($genreSeconds);
+    $topWeight = $genreSeconds ? max($genreSeconds) : 0;
+    foreach (array_slice($genreSeconds, 0, 8, true) as $name => $weight) {
+        $topGenres[] = [
+            'name'     => $name,
+            'seconds'  => (int)round($genreByTime ? $weight : 0),
+            'episodes' => (int)($genreEpisodes[$name] ?? 0),
+            'share'    => $topWeight > 0 ? (int)round($weight / $topWeight * 100) : 0,
+        ];
+    }
 } catch (Exception $e) {
     $topGenres = [];
 }
 
 // ─── Weekly pattern: which day of the week gets the most watching ────
 $weeklyPattern = [];
+// The unit follows whichever table answered. It used to be guessed from the
+// 30-day heatmap window, which called an account that watched last month an
+// "episodes" account even though its seconds were right there.
+$weeklyUnit = 'seconds';
 try {
     $stmt = $pdo->prepare("
         SELECT DAYNAME(updated_at) AS day_name, COALESCE(SUM(seconds), 0) AS seconds
@@ -191,6 +243,7 @@ if (empty($weeklyPattern)) {
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $weeklyPattern[$row['day_name']] = (int)$row['count'];
         }
+        if (!empty($weeklyPattern)) $weeklyUnit = 'episodes';
     } catch (Exception $e) {
         // keep it empty
     }
@@ -211,6 +264,7 @@ echo json_encode([
     'heatmap_episodes'     => $heatmapEpisodes,
     'top_anime'            => $topAnime,
     'top_genres'           => $topGenres,
+    'top_genre_basis'      => $genreBasis,
     'weekly_pattern'       => $weeklyPattern,
-    'weekly_unit'          => empty($dailySeconds) ? 'episodes' : 'seconds',
+    'weekly_unit'          => $weeklyUnit,
 ]);

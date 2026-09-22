@@ -48,9 +48,10 @@
             <div class="kp-panel-head">
                 <i class="fas fa-fire"></i>
                 <h3>Watch Activity (Last 30 Days)</h3>
-                <span class="kp-panel-note">Darker = more time watched</span>
+                <span class="kp-panel-note">Tap a day for the breakdown</span>
             </div>
             <div id="heatmap-grid" class="kp-heatmap-grid"></div>
+            <div id="heatmap-stats" class="kp-heat-summary"></div>
             <div class="kp-heatmap-legend">
                 <span>Less</span>
                 <div class="kp-heatmap-cell" style="background:#2d2d2d;"></div>
@@ -66,6 +67,7 @@
             <div class="kp-panel-head">
                 <i class="fas fa-tags"></i>
                 <h3>Top Genres</h3>
+                <span class="kp-panel-note" id="genre-note"></span>
             </div>
             <div id="genre-bars" class="kp-genre-bars"></div>
         </div>
@@ -77,6 +79,25 @@
                 <span class="kp-panel-note" id="weekly-unit-note"></span>
             </div>
             <div id="weekly-bars" class="kp-weekly-bars"></div>
+            <p class="kp-panel-foot-note" id="weekly-summary"></p>
+        </div>
+    </div>
+
+    <!-- Day detail: opened by tapping a heatmap cell. Lives inside the tab
+         fragment, so it is created and dropped with the fragment itself. -->
+    <div class="kp-day-modal" id="kp-day-modal" hidden>
+        <div class="kp-day-backdrop" data-kp-day-close></div>
+        <div class="kp-day-card" role="dialog" aria-modal="true" aria-labelledby="kp-day-title">
+            <button type="button" class="kp-day-close" data-kp-day-close aria-label="Close">
+                <i class="fas fa-xmark"></i>
+            </button>
+            <div class="kp-day-head">
+                <span class="kp-day-eyebrow"><i class="fas fa-calendar-day"></i> Watch activity</span>
+                <h3 id="kp-day-title">—</h3>
+            </div>
+            <div class="kp-day-body" id="kp-day-body">
+                <div class="kp-cw-loading"><span></span><span></span><span></span></div>
+            </div>
         </div>
     </div>
 </div>

@@ -46,6 +46,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
     if ($stmt->execute()) {
         echo json_encode(["status" => "success", "message" => "Registration successful.Now you can login."]);
+
+        // Welcome note, so the first login already has something in the bell.
+        // kp_notify_once() keeps it to exactly one row per account.
+        include_once __DIR__ . '/../includes/notify.php';
+        kp_notify_welcome($conn->insert_id, $userName);
     } else {
         echo json_encode(["status" => "error", "message" => "Error: " . $stmt->error]);
     }

@@ -182,8 +182,9 @@ if (!isset($GLOBALS['MOVIE_EMBED_PROVIDERS'])) {
         'vidlink'      => ['label' => 'VidLink',    'url' => 'https://vidlink.pro/movie/{tmdb}'],
         // === Then VidSrc ===
         'vidsrc-pm'    => ['label' => 'VidSrc (pm)','url' => 'https://vidsrc.pm/embed/movie/{tmdb}'],
-        'vidsrc-to'    => ['label' => 'VidSrc (to)','url' => 'https://vidsrc.to/embed/movie/{tmdb}'],
-        'vidsrc-cc'    => ['label' => 'VidSrc (cc)','url' => 'https://vidsrc.cc/v2/embed/movie/{tmdb}'],
+        // Current VidSrc mirrors — same pair the TV list uses (see the comment there).
+        'vidsrc-buzz'  => ['label' => 'VidSrc (buzz)','url' => 'https://vidsrc.buzz/embed/movie/{tmdb}'],
+        'videm'        => ['label' => 'Videm',        'url' => 'https://videm.xyz/embed/movie/{tmdb}'],
         // === Fallback ===
         'vidcore-org'  => ['label' => 'VidCore',    'url' => 'https://vidcore.org/embed/movie/{tmdb}'],
         '2embed-skin'  => ['label' => '2Embed',     'url' => 'https://www.2embed.skin/embed/{tmdb}'],
@@ -201,8 +202,14 @@ if (!isset($GLOBALS['TV_EMBED_PROVIDERS'])) {
         'vidlink'      => ['label' => 'VidLink',    'url' => 'https://vidlink.pro/tv/{tmdb}/{season}/{episode}'],
         // === Then VidSrc ===
         'vidsrc-pm'    => ['label' => 'VidSrc (pm)','url' => 'https://vidsrc.pm/embed/tv/{tmdb}/{season}/{episode}'],
-        'vidsrc-to'    => ['label' => 'VidSrc (to)','url' => 'https://vidsrc.to/embed/tv/{tmdb}/{season}/{episode}'],
-        'vidsrc-cc'    => ['label' => 'VidSrc (cc)','url' => 'https://vidsrc.cc/v2/embed/tv/{tmdb}/{season}/{episode}'],
+        /*
+         * Current VidSrc mirrors. Both answer with the resolved episode in
+         * their SSR payload, so they are the reliable pair when a show's
+         * season/episode map is missing from the older mirrors.
+         * (2Embed's own server list for a TV episode offers exactly these.)
+         */
+        'vidsrc-buzz'  => ['label' => 'VidSrc (buzz)','url' => 'https://vidsrc.buzz/embed/tv/{tmdb}/{season}/{episode}'],
+        'videm'        => ['label' => 'Videm',        'url' => 'https://videm.xyz/embed/tv/{tmdb}/{season}/{episode}'],
         // === Fallback ===
         'vidcore-org'  => ['label' => 'VidCore',    'url' => 'https://vidcore.org/embed/tv/{tmdb}/{season}/{episode}'],
         '2embed-skin'  => ['label' => '2Embed',     'url' => 'https://www.2embed.skin/embedtv/{tmdb}&s={season}&e={episode}'],

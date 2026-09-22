@@ -393,12 +393,46 @@
     padding-bottom: 4px;
 }
 
+/* Name + the rank badge the user earned, side by side. */
+.kp-prof-name-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 0 0 5px;
+}
+
 .kp-prof-name {
-    margin: 0 0 4px;
+    margin: 0;
     color: #fff;
     font-size: 20px;
     font-weight: 700;
     line-height: 1.2;
+}
+
+.kp-prof-rank {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px 4px 10px;
+    border-radius: 999px;
+    border: 1px solid;
+    font-family: 'Poppins', sans-serif;
+    font-size: 11.5px;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: default;
+    transition: transform 0.2s ease, filter 0.2s ease;
+}
+
+.kp-prof-rank i {
+    font-size: 10px;
+}
+
+.kp-prof-rank:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.18);
 }
 
 .kp-prof-sub {
@@ -609,71 +643,200 @@
     font-weight: 600;
 }
 
-.kp-activity-row {
+/* --- Rank + activity side by side (profile tab) --- */
+.kp-prof-split {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    gap: 12px;
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+    gap: 14px;
+    align-items: stretch;
+    margin-bottom: 14px;
 }
 
-.kp-activity {
+.kp-prof-split > .kp-panel {
+    margin-bottom: 0;
+}
+
+/* --- Your Activity --- */
+.kp-activity-panel {
     display: flex;
     flex-direction: column;
+}
+
+.kp-activity-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    flex: 1 1 auto;
+}
+
+.kp-act-card {
+    position: relative;
+    display: flex;
     align-items: center;
-    gap: 3px;
-    padding: 16px 10px;
-    border-radius: 10px;
-    background: #1a1a1a;
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    /* Grow evenly so the three rows fill whatever height the rank card sets. */
+    flex: 1 1 auto;
+    gap: 13px;
+    padding: 14px 15px;
+    border-radius: 12px;
+    background: linear-gradient(145deg, #1f1f1f, #191919);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    overflow: hidden;
+    text-decoration: none;
+    color: inherit;
+    transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
 }
 
-.kp-activity i {
-    color: #ff2e63;
-    font-size: 15px;
+/* Accent hairline down the left edge. */
+.kp-act-card::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 12px;
+    bottom: 12px;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--kp-accent, #ff2e63);
+    transition: top 0.25s ease, bottom 0.25s ease;
 }
 
-.kp-activity strong {
+a.kp-act-card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(255, 255, 255, 0.14);
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--kp-accent-soft);
+}
+
+a.kp-act-card:hover::before {
+    top: 0;
+    bottom: 0;
+}
+
+.kp-act-icon {
+    flex: 0 0 auto;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 12px;
+    background: var(--kp-accent-soft, rgba(255, 46, 99, 0.15));
+    color: var(--kp-accent, #ff2e63);
+    font-size: 17px;
+}
+
+.kp-act-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.kp-act-copy strong {
     color: #fff;
     font-size: 21px;
     font-weight: 700;
+    line-height: 1.15;
 }
 
-.kp-activity span {
-    color: #8b8f95;
-    font-size: 11.5px;
+.kp-act-label {
+    color: #e3e5e9;
+    font-size: 12.5px;
+    font-weight: 600;
+}
+
+.kp-act-hint {
+    color: #7c8085;
+    font-size: 10.5px;
+}
+
+.kp-act-chevron {
+    flex: 0 0 auto;
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    color: #6b7077;
+    font-size: 11px;
+    transition: transform 0.25s ease, color 0.25s ease;
+}
+
+a.kp-act-card:hover .kp-act-chevron {
+    color: var(--kp-accent, #ff2e63);
+    transform: translateX(3px);
 }
 
 /* --- Rank panel --- */
 .kp-rank-panel {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
     padding: 20px;
+    overflow: hidden;
 }
 
-.kp-rank-header {
+/* The rank colour bleeding in from the top-right corner. */
+.kp-rank-glow {
+    position: absolute;
+    top: -80px;
+    right: -70px;
+    width: 230px;
+    height: 230px;
+    border-radius: 50%;
+    opacity: 0.22;
+    filter: blur(72px);
+    pointer-events: none;
+}
+
+.kp-rank-hero {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 16px;
 }
 
 .kp-rank-badge {
-    width: 56px;
-    height: 56px;
-    border-radius: 14px;
-    border: 2px solid;
+    flex: 0 0 auto;
+    width: 64px;
+    height: 64px;
+    border-radius: 18px;
+    border: 1px solid;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 24px;
-    flex: 0 0 auto;
+    font-size: 26px;
 }
 
 .kp-rank-info {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 3px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.kp-rank-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #8b8f95;
+    font-family: 'Poppins', sans-serif;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+}
+
+.kp-rank-eyebrow i {
+    font-size: 10px;
 }
 
 .kp-rank-title {
-    font-size: 18px;
+    font-size: 20px;
     font-weight: 700;
+    line-height: 1.15;
     font-family: 'Poppins', sans-serif;
 }
 
@@ -683,139 +846,531 @@
     font-family: 'Poppins', sans-serif;
 }
 
-.kp-rank-progress {
+.kp-rank-sub strong {
+    color: #d7dae0;
+    font-weight: 600;
+}
+
+/* Circular progress dial (the ring itself is a conic-gradient inline). */
+.kp-rank-ring {
+    position: relative;
+    flex: 0 0 auto;
+    width: 76px;
+    height: 76px;
+    border-radius: 50%;
     display: flex;
     align-items: center;
+    justify-content: center;
+}
+
+.kp-rank-ring::before {
+    content: '';
+    position: absolute;
+    inset: 7px;
+    border-radius: 50%;
+    background: #1b1b1b;
+}
+
+.kp-rank-ring > span {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    line-height: 1;
+}
+
+.kp-rank-ring strong {
+    color: #fff;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.kp-rank-ring i {
+    color: #fff;
+    font-size: 15px;
+}
+
+.kp-rank-ring small {
+    color: #8b8f95;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.kp-rank-track {
+    position: relative;
+    display: flex;
+    flex-direction: column;
     gap: 10px;
-    margin-top: 14px;
 }
 
 .kp-rank-bar {
-    flex: 1;
-    height: 6px;
-    background: rgba(255, 255, 255, 0.08);
+    height: 9px;
+    background: rgba(255, 255, 255, 0.07);
     border-radius: 999px;
     overflow: hidden;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.45);
 }
 
 .kp-rank-fill {
+    position: relative;
     height: 100%;
     border-radius: 999px;
-    transition: width 0.6s ease;
+    transition: width 0.9s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.kp-rank-pct {
-    font-size: 12px;
-    color: #8b8f95;
+.kp-rank-fill::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.42));
+}
+
+.kp-rank-nodes {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 9px;
+}
+
+.kp-rank-node {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 11px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #d7dae0;
+    font-family: 'Poppins', sans-serif;
+    font-size: 11.5px;
     font-weight: 600;
-    min-width: 32px;
-    text-align: right;
+}
+
+.kp-rank-node i {
+    font-size: 10.5px;
+}
+
+.kp-rank-node small {
+    color: #8b8f95;
+    font-weight: 500;
+}
+
+.kp-rank-node.is-now {
+    padding-left: 9px;
+}
+
+.kp-rank-arrow {
+    color: #5b5f66;
+    font-size: 10px;
+}
+
+.kp-rank-foot {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: auto;
+}
+
+.kp-rank-week {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 13px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #9aa0a8;
+    font-family: 'Poppins', sans-serif;
+    font-size: 11.5px;
+}
+
+.kp-rank-week i {
+    color: #ffce00;
+    font-size: 11px;
+}
+
+.kp-rank-week strong {
+    color: #eaecef;
+    font-weight: 600;
 }
 
 /* View all ranks button + ladder modal */
 .kp-rank-viewall {
-    margin-top: 14px;
-    width: 100%;
-    padding: 8px 14px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.05);
-    color: #e8e8ee;
+    margin-left: auto;
+    padding: 9px 18px;
+    border: 1px solid rgba(255, 46, 99, 0.3);
+    border-radius: 10px;
+    background: rgba(255, 46, 99, 0.09);
+    color: #ff8fa8;
     font-size: 13px;
     font-weight: 600;
     font-family: 'Poppins', sans-serif;
     cursor: pointer;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
-    transition: background 0.2s ease, border-color 0.2s ease;
+    white-space: nowrap;
+    transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
 }
 .kp-rank-viewall:hover {
-    background: rgba(255, 46, 99, 0.12);
-    border-color: rgba(255, 46, 99, 0.35);
-    color: #ff2e63;
+    background: rgba(255, 46, 99, 0.18);
+    border-color: rgba(255, 46, 99, 0.5);
+    color: #fff;
+    transform: translateY(-1px);
 }
 
-.kp-rank-dialog { max-width: 520px; }
+/* Rank card + activity stack once the row gets too tight. */
+@media (max-width: 900px) {
+    .kp-prof-split {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
 
+@media (max-width: 640px) {
+    .kp-prof-name-row { justify-content: center; }
+}
+
+@media (max-width: 520px) {
+    .kp-rank-panel { padding: 16px; }
+    .kp-rank-hero { flex-wrap: wrap; }
+    .kp-rank-badge { width: 56px; height: 56px; border-radius: 16px; font-size: 22px; }
+    .kp-rank-title { font-size: 18px; }
+    .kp-rank-ring { width: 66px; height: 66px; }
+    .kp-rank-ring strong { font-size: 14px; }
+    .kp-rank-ring::before { inset: 6px; }
+    .kp-rank-foot { flex-direction: column; align-items: stretch; }
+    .kp-rank-week { justify-content: center; }
+    .kp-rank-viewall { margin-left: 0; width: 100%; }
+}
+
+.kp-rank-dialog { max-width: 560px; }
+
+/* --- Ladder modal: header --- */
+.kp-rank-modal-head {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    padding: 16px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.kp-rank-modal-head-badge {
+    flex: 0 0 auto;
+    width: 46px;
+    height: 46px;
+    border-radius: 13px;
+    border: 1px solid;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 19px;
+}
+
+.kp-rank-modal-head-copy {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.kp-rank-modal-head-copy h3 {
+    margin: 0 0 3px;
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.kp-rank-modal-head-copy p {
+    margin: 0;
+    color: #8b8f95;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.kp-rank-modal-head-copy p strong {
+    font-weight: 600;
+}
+
+.kp-rank-close {
+    flex: 0 0 auto;
+    width: 32px;
+    height: 32px;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.07);
+    color: #ccc;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease, transform 0.25s ease;
+}
+
+.kp-rank-close:hover {
+    background: #ff2e63;
+    color: #fff;
+    transform: rotate(90deg);
+}
+
+/* --- Ladder modal: overall progress --- */
+.kp-rank-summary {
+    padding: 13px 18px 15px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.kp-rank-summary-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 9px;
+    color: #9aa0a8;
+    font-family: 'Poppins', sans-serif;
+    font-size: 11.5px;
+}
+
+.kp-rank-summary-time i {
+    color: #ffce00;
+    font-size: 11px;
+    margin-right: 5px;
+}
+
+.kp-rank-summary-time strong {
+    color: #eaecef;
+    font-weight: 600;
+}
+
+.kp-rank-summary-pct {
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: rgba(255, 46, 99, 0.1);
+    border: 1px solid rgba(255, 46, 99, 0.22);
+    color: #ff8fa8;
+    font-weight: 600;
+}
+
+.kp-rank-summary-bar {
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.07);
+    overflow: hidden;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
+.kp-rank-summary-fill {
+    height: 100%;
+    border-radius: 999px;
+    transition: width 0.9s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* --- Ladder modal: the tiers --- */
 .kp-rank-ladder {
-    padding: 16px 20px 22px;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
+    padding: 14px 18px 8px;
     display: flex;
     flex-direction: column;
     gap: 10px;
-    max-height: min(70vh, 560px);
 }
 
-.kp-rank-tier {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 10px 14px;
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    opacity: 0.55;
+.kp-rank-ladder::-webkit-scrollbar { width: 8px; }
+.kp-rank-ladder::-webkit-scrollbar-track { background: transparent; }
+.kp-rank-ladder::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
 }
-.kp-rank-tier.is-unlocked { opacity: 1; }
+.kp-rank-ladder::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.22); }
+
+.kp-rank-tier {
+    position: relative;
+    display: flex;
+    /* flex-start keeps every badge on the same rail line, even in taller rows */
+    align-items: flex-start;
+    gap: 14px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    opacity: 0.5;
+    transition: opacity 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+/* Connector between two tier badges. */
+.kp-rank-tier:not(:last-child)::before {
+    content: '';
+    position: absolute;
+    left: 33px;
+    top: 56px;
+    bottom: -22px;
+    width: 2px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.kp-rank-tier.is-unlocked,
+.kp-rank-tier.is-current { opacity: 1; }
+
+.kp-rank-tier.is-unlocked:not(:last-child)::before { background: rgba(255, 255, 255, 0.16); }
+
+/* Stops the tier you are standing on, then fades into the locked ones. */
+.kp-rank-tier.is-current:not(:last-child)::before {
+    background: linear-gradient(180deg, var(--kp-tier-line, rgba(255, 46, 99, 0.5)), rgba(255, 255, 255, 0.06));
+}
+
+.kp-rank-tier.is-locked:hover { opacity: 0.72; }
+
 .kp-rank-tier.is-current {
-    opacity: 1;
     border-color: rgba(255, 46, 99, 0.45);
-    background: rgba(255, 46, 99, 0.08);
-    box-shadow: 0 0 0 1px rgba(255, 46, 99, 0.15);
+    background: rgba(255, 46, 99, 0.07);
+    box-shadow: 0 0 0 1px rgba(255, 46, 99, 0.15), 0 8px 22px rgba(0, 0, 0, 0.3);
+}
+
+.kp-rank-tier-rail {
+    flex: 0 0 auto;
+    align-self: flex-start;
 }
 
 .kp-rank-tier-badge {
     width: 40px;
     height: 40px;
-    border-radius: 10px;
-    border: 1.5px solid;
+    border-radius: 11px;
+    border: 1.5px solid var(--kp-tier-line, rgba(255, 255, 255, 0.12));
+    background: var(--kp-tier-soft, rgba(255, 255, 255, 0.06));
+    color: var(--kp-tier, #8b8f95);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 17px;
-    flex: 0 0 auto;
+    font-size: 16px;
 }
 
 .kp-rank-tier-info {
     display: flex;
     flex-direction: column;
-    gap: 1px;
-    flex: 1;
+    gap: 2px;
+    flex: 1 1 auto;
     min-width: 0;
 }
+
 .kp-rank-tier-title {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    color: var(--kp-tier, #d7dae0);
     font-size: 14px;
     font-weight: 700;
     font-family: 'Poppins', sans-serif;
 }
+
+.kp-rank-tier-lv {
+    font-style: normal;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    color: #7c8085;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+}
+
 .kp-rank-tier-req {
     font-size: 12px;
     color: #8b8f95;
     font-family: 'Poppins', sans-serif;
 }
 
+/* Progress inside the tier you are currently on. */
+.kp-rank-tier-mini {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-top: 7px;
+    max-width: 260px;
+}
+
+.kp-rank-tier-mini-bar {
+    display: block;
+    height: 5px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+}
+
+.kp-rank-tier-mini-bar > span {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--kp-tier-line, rgba(255, 46, 99, 0.55)), var(--kp-tier, #ff2e63));
+}
+
+.kp-rank-tier-mini small {
+    color: #7c8085;
+    font-size: 10.5px;
+}
+
 .kp-rank-tier-tag {
+    flex: 0 0 auto;
+    align-self: center;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-family: 'Poppins', sans-serif;
     font-size: 11px;
     font-weight: 700;
-    padding: 3px 9px;
-    border-radius: 999px;
-    flex: 0 0 auto;
+    white-space: nowrap;
 }
+
 .kp-rank-tier-tag.is-current {
     background: #ff2e63;
     color: #fff;
 }
+
 .kp-rank-tier-tag.is-unlocked {
-    background: rgba(25, 135, 84, 0.18);
-    color: #198754;
-    border: 1px solid rgba(25, 135, 84, 0.35);
+    background: rgba(63, 208, 127, 0.14);
+    border: 1px solid rgba(63, 208, 127, 0.32);
+    color: #3fd07f;
 }
+
 .kp-rank-tier-tag.is-locked {
     background: rgba(255, 255, 255, 0.06);
-    color: #6c757d;
     border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #8b8f95;
+}
+
+.kp-rank-modal-foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 18px;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    color: #7c8085;
+    font-size: 11.5px;
+}
+
+.kp-rank-modal-foot i {
+    color: #ff2e63;
+}
+
+@media (max-width: 560px) {
+    .kp-rank-modal-head,
+    .kp-rank-summary,
+    .kp-rank-modal-foot { padding-left: 14px; padding-right: 14px; }
+    .kp-rank-ladder { padding: 12px 14px 6px; }
+    .kp-rank-tier { padding: 11px 12px; gap: 11px; }
+    .kp-rank-tier:not(:last-child)::before { left: 31px; top: 55px; }
+    .kp-rank-tier-tag { padding: 4px 8px; font-size: 10px; }
+    .kp-rank-tier-tag.is-current i,
+    .kp-rank-tier-tag.is-unlocked i { display: none; }
 }
 
 /* --- Avatar row inside the profile tab --- */
@@ -2944,4 +3499,763 @@
     width: 100%;
     height: auto;
   }
+}
+
+/* ============================================================
+   Achievement badges (profile tab)
+   ------------------------------------------------------------
+   Deliberately NOT called .kp-badge: watch_page_style.css already defines
+   `.kp-badge` as an uppercase provider pill and that file is loaded on every
+   page, so a shared name silently restyled these cards.
+   ============================================================ */
+
+.kp-ach-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 10px;
+}
+
+.kp-ach {
+    --kp-accent: #ff2e63;
+    --kp-accent-soft: rgba(255, 46, 99, 0.14);
+    --kp-accent-line: rgba(255, 46, 99, 0.35);
+    position: relative;
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 11px;
+    min-height: 68px;
+    padding: 12px 14px 15px;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #1b1b1b;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    /* Own type scale, so nothing loaded later can turn these into pills. */
+    font-family: 'Poppins', sans-serif;
+    font-size: 12px;
+    font-weight: 400;
+    letter-spacing: normal;
+    text-transform: none;
+    color: #9aa0a6;
+    transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+/* Accent rail down the left edge, revealed once the badge is earned. */
+.kp-ach::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--kp-accent);
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.kp-ach.is-unlocked {
+    background: linear-gradient(135deg, var(--kp-accent-soft), #1b1b1b 65%);
+    border-color: var(--kp-accent-line);
+}
+
+.kp-ach.is-unlocked::before { opacity: 1; }
+
+.kp-ach:hover {
+    transform: translateY(-2px);
+    border-color: var(--kp-accent-line);
+}
+
+.kp-ach-icon {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.05);
+    color: #6d7176;
+    font-size: 16px;
+    transition: background 0.2s ease, color 0.2s ease;
+}
+
+.kp-ach.is-unlocked .kp-ach-icon {
+    background: var(--kp-accent-soft);
+    color: var(--kp-accent);
+}
+
+.kp-ach-tick {
+    position: absolute;
+    right: -4px;
+    bottom: -4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--kp-accent);
+    color: #14181d;
+    font-size: 8px;
+    box-shadow: 0 0 0 2px #1b1b1b;
+}
+
+.kp-ach-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.kp-ach-copy strong {
+    color: #b9bdc2;
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: normal;
+    text-transform: none;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.kp-ach.is-unlocked .kp-ach-copy strong { color: var(--kp-accent); }
+
+.kp-ach-hint {
+    color: #75797e;
+    font-size: 10.5px;
+    line-height: 1.3;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.kp-ach-state {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    min-width: 34px;
+    color: #6d7176;
+}
+
+.kp-ach-state small {
+    font-size: 10.5px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.kp-ach.is-unlocked .kp-ach-state {
+    color: var(--kp-accent);
+    font-size: 14px;
+}
+
+/* Progress sits on the card's bottom edge like a fuel gauge. */
+.kp-ach-progress {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 3px;
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.kp-ach-progress > span {
+    display: block;
+    height: 100%;
+    background: var(--kp-accent);
+    border-radius: 0 999px 999px 0;
+}
+
+.kp-ach-foot {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 12px 0 0;
+    color: #75797e;
+    font-size: 11.5px;
+}
+
+.kp-ach-foot i {
+    color: #ff2e63;
+    font-size: 11px;
+}
+
+/* ============================================================
+   Account forms (settings tab)
+   ============================================================ */
+
+.kp-account-form {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    padding: 12px;
+    margin-bottom: 12px;
+    border-radius: 9px;
+    background: #1a1a1a;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.kp-account-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.kp-account-field > span {
+    color: #8b8f95;
+    font-size: 11.5px;
+    font-weight: 500;
+}
+
+.kp-account-field > span i {
+    color: #ff2e63;
+    margin-right: 5px;
+}
+
+.kp-account-field input {
+    width: 100%;
+    padding: 9px 11px;
+    border-radius: 7px;
+    background: #121212;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #f0f0f0;
+    font-family: inherit;
+    font-size: 13px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.kp-account-field input:focus {
+    outline: none;
+    border-color: rgba(255, 46, 99, 0.55);
+    box-shadow: 0 0 0 3px rgba(255, 46, 99, 0.12);
+}
+
+.kp-account-hint {
+    margin: 0;
+    color: #6d7176;
+    font-size: 10.5px;
+    line-height: 1.45;
+}
+
+.kp-account-save {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 15px;
+    border: 0;
+    border-radius: 7px;
+    background: linear-gradient(135deg, #ff2e63, #d91a50);
+    color: #fff;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s ease, opacity 0.2s ease;
+}
+
+.kp-account-save:hover:not(:disabled) {
+    background: linear-gradient(135deg, #d91a50, #b01540);
+}
+
+.kp-account-save:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
+.kp-account-msg {
+    margin: 0;
+    min-height: 15px;
+    font-size: 11.5px;
+    color: #8b8f95;
+}
+
+.kp-account-msg.is-ok { color: #4ade80; }
+.kp-account-msg.is-error { color: #f87171; }
+
+/* ============================================================
+   Misc polish
+   ============================================================ */
+
+/* Tab loader: a quiet row instead of a bare font-awesome spinner. */
+.kp-tab-error {
+    margin: 0;
+    padding: 22px;
+    text-align: center;
+    color: #ffb3c7;
+    font-size: 13px;
+}
+
+.menu-option-tabs .nav-link:focus-visible {
+    outline: 2px solid rgba(255, 46, 99, 0.6);
+    outline-offset: -2px;
+}
+
+/* ============================================================
+   Stats — 30 day activity strip + the day breakdown modal
+   ============================================================ */
+
+/* The heatmap cells are buttons now (tapping one opens its day), so the
+   browser chrome has to go while the colour ramp stays. */
+.kp-heatmap-cell {
+    appearance: none;
+    -webkit-appearance: none;
+    padding: 0;
+    border: 0;
+    font: inherit;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.kp-heatmap-cell:hover {
+    transform: scale(1.2);
+}
+
+.kp-heatmap-cell:focus-visible {
+    outline: 2px solid #ff2e63;
+    outline-offset: 2px;
+}
+
+.kp-heatmap-cell.is-today {
+    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.5);
+}
+
+/* The legend swatches reuse the cell class but are not days. */
+.kp-heatmap-legend .kp-heatmap-cell {
+    cursor: default;
+    pointer-events: none;
+}
+
+.kp-heat-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+.kp-heat-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 96px;
+    padding: 8px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+button.kp-heat-stat {
+    appearance: none;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+button.kp-heat-stat:hover,
+button.kp-heat-stat:focus-visible {
+    border-color: rgba(255, 46, 99, 0.45);
+    background: rgba(255, 46, 99, 0.1);
+    outline: none;
+}
+
+.kp-heat-stat-value {
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+}
+
+.kp-heat-stat-label {
+    font-size: 10px;
+    letter-spacing: 0.2px;
+    color: #8b8f95;
+}
+
+.kp-heat-stat.is-best .kp-heat-stat-value {
+    color: #ff2e63;
+}
+
+.kp-heat-note {
+    font-size: 12px;
+    color: #8b8f95;
+}
+
+/* ─── Day detail modal ─────────────────────────────────────── */
+.kp-day-modal {
+    position: fixed;
+    inset: 0;
+    /* Same layer as the rank/avatar modals: above the navbar and the drawer. */
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+    font-family: 'Poppins', sans-serif;
+}
+
+/* `display:flex` above would otherwise beat the UA rule for [hidden]. */
+.kp-day-modal[hidden] {
+    display: none;
+}
+
+.kp-day-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.68);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+
+.kp-day-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: min(100%, 520px);
+    max-height: min(82vh, 620px);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    background: #232323;
+    box-shadow: 0 26px 60px rgba(0, 0, 0, 0.55);
+    overflow: hidden;
+    animation: kpDayIn 0.18s ease-out;
+}
+
+@keyframes kpDayIn {
+    from { opacity: 0; transform: translateY(10px) scale(0.98); }
+    to   { opacity: 1; transform: none; }
+}
+
+.kp-day-close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #bbbbbb;
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease;
+}
+
+.kp-day-close:hover {
+    background: rgba(255, 46, 99, 0.18);
+    color: #ff2e63;
+}
+
+.kp-day-head {
+    padding: 16px 54px 12px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.kp-day-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: #ff2e63;
+}
+
+.kp-day-head h3 {
+    margin: 4px 0 0;
+    font-size: 17px;
+    font-weight: 600;
+    color: #fff;
+}
+
+/* The tier list scrolls, the header stays put. */
+.kp-day-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 14px 16px 18px;
+    overscroll-behavior: contain;
+}
+
+.kp-day-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.kp-day-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.kp-day-stat-value {
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+}
+
+.kp-day-stat-label {
+    font-size: 10px;
+    color: #8b8f95;
+}
+
+.kp-day-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.kp-day-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    text-decoration: none;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.kp-day-row:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+.kp-day-poster {
+    flex-shrink: 0;
+    width: 34px;
+    height: 48px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: #2c2c2c;
+}
+
+.kp-day-poster img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.kp-day-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.kp-day-name {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: #eeeeee;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.kp-day-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.kp-day-chip {
+    padding: 1px 6px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 46, 99, 0.25);
+    background: rgba(255, 46, 99, 0.14);
+    color: #ff7a9c;
+    font-size: 10px;
+    letter-spacing: normal;
+    text-transform: none;
+}
+
+.kp-day-chip.is-more {
+    border-color: transparent;
+    background: rgba(255, 255, 255, 0.06);
+    color: #9aa0a6;
+}
+
+.kp-day-meta {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+}
+
+.kp-day-time {
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+}
+
+.kp-day-eps {
+    font-size: 10px;
+    color: #8b8f95;
+}
+
+body.kp-modal-open {
+    overflow: hidden;
+}
+
+/* Notification settings: explains what each switch actually gates. */
+.kp-noti-settings-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 12px 2px 0;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: #8b8f95;
+}
+
+.kp-noti-settings-note i {
+    margin-top: 2px;
+    color: #ff2e63;
+    font-size: 11px;
+}
+
+.kp-noti-settings-note strong {
+    color: #cccccc;
+    font-weight: 600;
+}
+
+/* ─── Top Genres: time + episode count instead of a bare number ─── */
+.kp-genre-meta {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 1px;
+    min-width: 58px;
+}
+
+.kp-genre-time {
+    font-size: 11px;
+    font-weight: 600;
+    color: #cccccc;
+}
+
+.kp-genre-count {
+    min-width: 0;
+    font-size: 10px;
+}
+
+/* ─── Weekly pattern: busiest weekday + summary line ────────────── */
+.kp-weekly-bar.is-best .kp-weekly-fill {
+    background: linear-gradient(to top, #ff2e63, #ffb3c7);
+    box-shadow: 0 0 12px rgba(255, 46, 99, 0.35);
+}
+
+.kp-weekly-bar.is-best .kp-weekly-day {
+    color: #fff;
+    font-weight: 700;
+}
+
+.kp-weekly-bar.is-best .kp-weekly-count {
+    color: #ff7a9c;
+}
+
+.kp-panel-foot-note {
+    margin: 12px 0 0;
+    font-size: 11.5px;
+    color: #8b8f95;
+}
+
+.kp-panel-foot-note strong {
+    color: #ff2e63;
+    font-weight: 600;
+}
+
+@media (max-width: 520px) {
+    .kp-day-modal {
+        align-items: flex-end;
+        padding: 10px;
+    }
+
+    .kp-day-card {
+        max-height: 88vh;
+    }
+
+    .kp-day-stats {
+        gap: 6px;
+    }
+
+    .kp-day-stat {
+        padding: 8px 9px;
+    }
+}
+
+[data-theme="light"] .kp-day-card {
+    background: #ffffff;
+    border-color: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .kp-day-head h3,
+[data-theme="light"] .kp-day-stat-value,
+[data-theme="light"] .kp-day-time,
+[data-theme="light"] .kp-heat-stat-value {
+    color: #1a1a1a;
+}
+
+[data-theme="light"] .kp-day-stat,
+[data-theme="light"] .kp-heat-stat {
+    background: #f7f7fa;
+    border-color: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .kp-day-name {
+    color: #222222;
+}
+
+[data-theme="light"] .kp-genre-time {
+    color: #444444;
+}
+
+/* Settings > Show Ratings: hides every score badge without touching markup. */
+body.ratings-hidden .kp-card-rating-badge,
+body.ratings-hidden .kp-wl-card-rating,
+body.ratings-hidden .kp-cw-rating {
+    display: none !important;
+}
+
+/* Continue Watching hero: the trash button matches the other two actions. */
+.kp-cw-hero .kp-cw-btn.ghost {
+    width: 34px;
+    padding: 8px 0;
+    font-size: 12px;
+}
+
+@media (max-width: 560px) {
+    .kp-ach-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .kp-ach {
+        min-height: 62px;
+        padding: 11px 12px 14px;
+    }
+
+    .kp-account-form {
+        padding: 11px;
+    }
+
+    .kp-account-save {
+        width: 100%;
+        justify-content: center;
+    }
 }

@@ -2562,7 +2562,13 @@
     gap: 16px;
   }
 
-  .right-nav i {
+  /*
+   * Only the three bar icons: search / bell / avatar. Written as a child
+   * selector because a plain `.right-nav i` also reaches every icon inside the
+   * dropdowns that live in the same wrapper — which inflated the rank badge and
+   * padded the menu icons out of line.
+   */
+  .right-nav > .icon-wrapper > i {
     font-size: 18px;
     padding: 8px;
   }

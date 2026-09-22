@@ -9,8 +9,10 @@
     if (window.__kpRankModalLoaded) return;
     window.__kpRankModalLoaded = true;
 
+    // The modal lives inside the profile tab fragment, which is fetched via
+    // innerHTML AFTER this defer script runs — so it may not exist yet. Never
+    // bail here; resolve() picks it up lazily on first open.
     let modal = document.getElementById('kp-rank-modal');
-    if (!modal) return;
 
     // A transformed ancestor becomes the containing block for `position: fixed`;
     // re-parent to <body> so the overlay is not trapped by the tab wrapper.
@@ -20,18 +22,20 @@
         }
     }
 
-    attach(modal);
-
     let lastFocus = null;
 
     function resolve() {
-        if (modal && document.contains(modal)) return modal;
-        // The profile tab was re-fetched; pick up the fresh copy.
-        modal = document.getElementById('kp-rank-modal') || modal;
-        attach(modal);
-        document.querySelectorAll('#kp-rank-modal').forEach((node) => {
-            if (node !== modal) node.remove();
-        });
+        if (!modal || !document.contains(modal)) {
+            // First open, or the profile tab was re-fetched; grab the live copy.
+            modal = document.getElementById('kp-rank-modal') || modal;
+            attach(modal);
+        }
+        // Drop stale duplicates left in the tab (id collision after re-fetch).
+        if (modal) {
+            document.querySelectorAll('#kp-rank-modal').forEach((node) => {
+                if (node !== modal) node.remove();
+            });
+        }
         return modal;
     }
 

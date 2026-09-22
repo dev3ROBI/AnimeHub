@@ -35,8 +35,13 @@ foreach ($rw_rows as $rw) {
     $info = catalog_info($slug);
     if (!$info) continue;
 
+    // TMDB TV stores a season-aware number (see progress_episode_key()), so
+    // split it back into season + episode for the label and the link. The
+    // stored value stays the handle for every lookup below.
     $cwEpisode = (int)($rw['episode_number'] ?? 1);
-    $info['episode'] = $cwEpisode;
+    $cwSplit   = progress_split_episode_key($slug, $cwEpisode);
+    $info['episode'] = $cwSplit['episode'];
+    if ($cwSplit['season'] > 0) $info['season_number'] = $cwSplit['season'];
 
     // The saved playback position lives in video_progress (keyed by anime +
     // episode) and the runtime comes from the catalogue row, so both are
@@ -228,7 +233,7 @@ $quickStats = [
                     $cwTitle = kp_e($rw['title'] ?? 'Unknown');
                     $cwPoster = $rw['poster'] ?: './uploads/thumbnails/default.png';
                     $cwEp = $rw['episode'] ?? 1;
-                    $cwLink = kp_watch_url($rw, $cwEp);
+                    $cwLink = kp_watch_url($rw, $cwEp, $rw['season_number'] ?? null);
                     $cwPos = (int)($rw['last_position'] ?? 0);
                     $cwDur = (int)($rw['duration'] ?? 1440);
                     if ($cwDur <= 0) $cwDur = 1440;
@@ -238,6 +243,9 @@ $quickStats = [
                     $cwWatchedTotal = (int)($rw['watched_total'] ?? 0);
                     $cwWatchedEps   = (int)($rw['watched_episodes'] ?? 0);
                     $cwEpTotal = $rw['episodes'] ?? null;
+                    $cwEpLabel = !empty($rw['season_number'])
+                        ? 'S' . (int)$rw['season_number'] . ' E' . (int)$cwEp
+                        : (string)(int)$cwEp;
                     ?>
                     <div class="watch-item" data-kp="">
                         <a href="<?= $cwLink ?>" class="kp-card-link" style="text-decoration:none;">
@@ -249,7 +257,7 @@ $quickStats = [
                                         <button type="button" class="kp-card-play-btn" aria-label="Play"><i class="fas fa-play"></i></button>
                                     </div>
                                     <div class="kp-card-ep-bar">
-                                        <span><i class="fas fa-closed-captioning"></i> <?= $cwEp ?></span>
+                                        <span><i class="fas fa-closed-captioning"></i> <?= kp_e($cwEpLabel) ?></span>
                                         <span><i class="fas fa-layer-group"></i> <?= $cwEpTotal ?: '?' ?></span>
                                     </div>
                                 </div>

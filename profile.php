@@ -33,6 +33,12 @@ if ($result->num_rows === 1) {
 
 include_once 'includes/avatars.php';
 include_once 'includes/catalog.php';
+// progress.php pulls in watch_time.php too, and the rank badge needs
+// progress_format_time() for its tooltip — so include that one, not both.
+include_once 'includes/progress.php';
+
+// ─── Rank badge shown next to the username ───────────────────────────
+$kp_rank = watch_time_rank($userID);
 
 // ─── Avatar ───────────────────────────────────────────────────────────
 $avatarValue = (string)($user['User_Avatar'] ?? '');
@@ -116,7 +122,15 @@ if (!empty($user['User_Join'])) {
                 </div>
 
                 <div class="kp-prof-meta">
-                    <h1 class="kp-prof-name"><?= htmlspecialchars($user['User_Name']) ?></h1>
+                    <div class="kp-prof-name-row">
+                        <h1 class="kp-prof-name"><?= htmlspecialchars($user['User_Name']) ?></h1>
+                        <span class="kp-prof-rank"
+                              title="Rank: <?= htmlspecialchars($kp_rank['title']) ?> — <?= htmlspecialchars(progress_format_time($kp_rank['seconds'])) ?> watched"
+                              style="color:<?= htmlspecialchars($kp_rank['color']) ?>; border-color:<?= htmlspecialchars($kp_rank['color']) ?>59; background:<?= htmlspecialchars($kp_rank['color']) ?>24;">
+                            <i class="<?= htmlspecialchars($kp_rank['icon']) ?>"></i>
+                            <?= htmlspecialchars($kp_rank['title']) ?>
+                        </span>
+                    </div>
                     <p class="kp-prof-sub">
                         <span><i class="fas fa-envelope"></i> <?= htmlspecialchars($user['User_Email']) ?></span>
                         <span><i class="fas fa-crown"></i> <?= htmlspecialchars(ucfirst($user['User_Role'] ?? 'user')) ?></span>
@@ -225,18 +239,15 @@ if (!empty($user['User_Join'])) {
 
 <script>
     document.addEventListener('DOMContentLoaded', function () {
-        const tabs = document.querySelectorAll('.nav-link');
+        const tabs = document.querySelectorAll('.nav-link[data-target]');
+        const tabBar = document.querySelector('.menu-option-tabs');
         const contentWrapper = document.querySelector('.menu-option-tabs-content');
         const spinner = document.getElementById('tab-loading-spinner');
         const innerContent = document.getElementById('tab-inner-content');
 
-        function getQueryParam(param) {
-            const urlParams = new URLSearchParams(window.location.search);
-            return urlParams.get(param);
-        }
-
         // Scripts inside a fragment set with innerHTML never run, so each tab
-        // that needs behaviour ships a real file and declares it here.
+        // that needs behaviour ships a real file and declares it here. They are
+        // re-fetched on every visit (the DOM they bind to is replaced each time).
         const TAB_SCRIPTS = {
             'continue-watching': ['./user/js/continue-watching.js'],
             'watch-list':        ['./user/js/watch-list.js'],
@@ -244,6 +255,21 @@ if (!empty($user['User_Join'])) {
             'stats':             ['./user/js/stats.js'],
             'settings':          ['./user/js/settings.js']
         };
+
+        // Only fragments that actually exist can be fetched. Without this the
+        // `?tab=` query string went straight into the request URL, so any other
+        // value fetched nothing (or worse, another page in the app).
+        const ALLOWED_TABS = ['profile'].concat(Object.keys(TAB_SCRIPTS));
+
+        function getQueryParam(param) {
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get(param);
+        }
+
+        function cleanTab(value) {
+            const target = String(value || '').trim();
+            return ALLOWED_TABS.indexOf(target) !== -1 ? target : 'profile';
+        }
 
         function loadTabScript(target) {
             (TAB_SCRIPTS[target] || []).forEach((src) => {
@@ -253,53 +279,103 @@ if (!empty($user['User_Join'])) {
             });
         }
 
-        function activateTab(target) {
-            tabs.forEach(t => t.classList.remove('active'));
-            const targetTab = Array.from(tabs).find(t => t.getAttribute('data-target') === target);
-            if (targetTab) targetTab.classList.add('active');
+        let currentTab = null;
+
+        function highlightTab(target) {
+            tabs.forEach(t => {
+                const on = t.getAttribute('data-target') === target;
+                t.classList.toggle('active', on);
+                t.setAttribute('aria-selected', on ? 'true' : 'false');
+                if (on && tabBar && t.scrollIntoView) {
+                    // Six tabs do not fit on a phone — keep the active one in view.
+                    t.scrollIntoView({ block: 'nearest', inline: 'center' });
+                }
+            });
+        }
+
+        function activateTab(target, opts) {
+            opts = opts || {};
+            target = cleanTab(target);
+            if (!opts.force && target === currentTab) return;
+            currentTab = target;
+
+            highlightTab(target);
 
             contentWrapper.classList.remove('show');
             innerContent.innerHTML = '';
             spinner.style.display = 'block';
 
-            setTimeout(() => {
-                fetch(`./user/${target}.php`)
-                    .then(res => {
-                        if (!res.ok) throw new Error('Network error');
-                        return res.text();
-                    })
-                    .then(data => {
-                        spinner.style.display = 'none';
-                        innerContent.innerHTML = data;
+            fetch(`./user/${target}.php`)
+                .then(res => {
+                    if (!res.ok) throw new Error('This tab could not be loaded');
+                    return res.text();
+                })
+                .then(data => {
+                    spinner.style.display = 'none';
+                    innerContent.innerHTML = data;
 
-                        // Load JS dynamically for specific tabs
-                        loadTabScript(target);
+                    // Load JS dynamically for specific tabs
+                    loadTabScript(target);
 
-                        // Trigger fade-in
-                        void contentWrapper.offsetWidth;
-                        contentWrapper.classList.add('show');
-                    })
-                    .catch(err => {
-                        spinner.style.display = 'none';
-                        innerContent.innerHTML =
-                        `<p style="color:white;">Error: ${err.message}</p>`;
-                        contentWrapper.classList.add('show');
-                    });
-            }, 200);
+                    // Trigger fade-in
+                    void contentWrapper.offsetWidth;
+                    contentWrapper.classList.add('show');
+
+                    // The tab bar sits above the content, so a switch that
+                    // happened while scrolled down should not leave the viewer
+                    // staring at the middle of a new tab.
+                    if (opts.scroll && tabBar && tabBar.getBoundingClientRect().top < 0) {
+                        tabBar.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                    }
+                })
+                .catch(err => {
+                    spinner.style.display = 'none';
+                    const box = document.createElement('p');
+                    box.className = 'kp-tab-error';
+                    box.textContent = 'Error: ' + err.message;
+                    innerContent.innerHTML = '';
+                    innerContent.appendChild(box);
+                    contentWrapper.classList.add('show');
+                });
         }
 
+        function goToTab(target, opts) {
+            target = cleanTab(target);
+            activateTab(target, opts);
+            if (getQueryParam('tab') !== target) {
+                history.pushState({ tab: target }, '', `?tab=${target}`);
+            }
+        }
 
-
-        const initialTab = getQueryParam('tab') || 'profile';
-        activateTab(initialTab);
+        activateTab(getQueryParam('tab') || 'profile');
 
         tabs.forEach(tab => {
             tab.addEventListener('click', function (e) {
                 e.preventDefault();
-                const target = this.getAttribute('data-target');
-                activateTab(target);
-                history.pushState(null, '', `?tab=${target}`);
+                goToTab(this.getAttribute('data-target'), { scroll: true });
             });
+        });
+
+        // In-page links between tabs (the activity cards, "keep browsing" CTAs)
+        // switch the tab in place instead of reloading the whole page.
+        document.addEventListener('click', function (e) {
+            const link = e.target.closest('[data-kp-tab], a[href^="?tab="]');
+            if (!link) return;
+
+            let target = link.getAttribute('data-kp-tab') || '';
+            if (!target) {
+                const href = link.getAttribute('href') || '';
+                target = new URLSearchParams(href.split('?')[1] || '').get('tab') || '';
+            }
+            if (ALLOWED_TABS.indexOf(target) === -1) return;
+
+            e.preventDefault();
+            goToTab(target, { scroll: true });
+        });
+
+        // Back/forward must move between tabs, not out of the profile page.
+        window.addEventListener('popstate', function () {
+            activateTab(getQueryParam('tab') || 'profile');
         });
     });
 </script>

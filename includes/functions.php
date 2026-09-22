@@ -43,13 +43,20 @@ function kp_user_settings($pdo, $user_id) {
     return $defaults;
 }
 
-/** URL for a catalogue item's watch page. */
-function kp_watch_url($item, $episode = null) {
+/**
+ * URL for a catalogue item's watch page.
+ *
+ * $season matters for TMDB TV: it numbers episodes per season, so an episode
+ * number without its season would always land on season 1 (see
+ * progress_episode_key() in includes/progress.php).
+ */
+function kp_watch_url($item, $episode = null, $season = null) {
     if (!is_array($item)) return './index.php';
     $id = $item['id'] ?? null;
     if (empty($id)) return './index.php';
 
     $url = './watch.php?id=' . urlencode($id);
+    if ($season !== null && (int)$season > 0) $url .= '&season=' . (int)$season;
     if ($episode !== null) $url .= '&ep=' . intval($episode);
     return $url;
 }

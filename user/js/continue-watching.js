@@ -22,6 +22,10 @@
         if (item.type === 'episode') {
             return 'S' + esc(item.season_number) + ' E' + esc(item.episode_number);
         }
+        // TMDB TV carries a season, so label it the way the watch page does.
+        if (item.season_number) {
+            return 'S' + esc(item.season_number) + ' E' + esc(item.episode_number);
+        }
         if (item.episode_number) {
             return 'EP ' + esc(item.episode_number)
                 + (item.total_episodes ? ' / ' + esc(item.total_episodes) : '');
@@ -60,6 +64,33 @@
         container.appendChild(box);
     }
 
+    /**
+     * Drop a title from Continue Watching.
+     *
+     * Shared by the hero card and the grid cards so the trash button behaves
+     * the same wherever it is clicked.
+     */
+    function removeFromHistory(item, card) {
+        if (!window.confirm('Remove "' + (item.title || 'this title') + '" from your watch history?')) return;
+
+        card.classList.add('is-busy');
+        fetch(clearEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'video_id=' + encodeURIComponent(item.video_id)
+        })
+            .then((r) => r.json())
+            .then((data) => {
+                if (!data || !data.ok) throw new Error('clear failed');
+                card.remove();
+                if (!container.querySelector('.kp-cw-card, .kp-cw-hero')) {
+                    emptyState('Your recent activity is clear. Start watching something new.');
+                }
+                if (typeof kpToast === 'function') kpToast('Removed from Continue Watching', 'success');
+            })
+            .catch(() => card.classList.remove('is-busy'));
+    }
+
     // ─── Next up card (hero) ────────────────────────────────────────
     function renderHero(item) {
         const pct = Math.max(2, Math.min(100, parseInt(item.percent, 10) || 0));
@@ -83,6 +114,8 @@
           +       '<a class="kp-cw-next" href="' + esc(item.next_url || item.url) + '">'
           +         (item.next_episode ? 'Watch EP ' + esc(item.next_episode) : 'Watch now')
           +         ' <i class="fas fa-chevron-right"></i></a>'
+          +       '<button type="button" class="kp-cw-btn ghost kp-cw-remove" title="Remove from history"'
+          +         ' aria-label="Remove from history"><i class="fas fa-trash"></i></button>'
           +     '</div>'
           +   '</div>'
           + '</div>';
@@ -92,6 +125,14 @@
             epLabel(item) + (item.percent > 0 ? ' \u00b7 ' + item.percent + '% watched' : '');
         if (!item.next_url || !item.next_episode) {
             card.querySelector('.kp-cw-next').remove();
+        }
+
+        const heroRemove = card.querySelector('.kp-cw-remove');
+        if (heroRemove) {
+            heroRemove.addEventListener('click', (e) => {
+                e.preventDefault();
+                removeFromHistory(item, card);
+            });
         }
         return card;
     }
@@ -138,22 +179,7 @@
         if (remove) {
             remove.addEventListener('click', (e) => {
                 e.preventDefault();
-                const body = 'video_id=' + encodeURIComponent(item.video_id);
-                card.classList.add('is-busy');
-                fetch(clearEndpoint, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: body
-                })
-                    .then((r) => r.json())
-                    .then((data) => {
-                        if (!data || !data.ok) throw new Error('clear failed');
-                        card.remove();
-                        if (!container.querySelector('.kp-cw-card, .kp-cw-hero')) {
-                            emptyState('Your recent activity is clear. Start watching something new.');
-                        }
-                    })
-                    .catch(() => card.classList.remove('is-busy'));
+                removeFromHistory(item, card);
             });
         }
 

@@ -67,5 +67,12 @@ if (!isset($_SESSION['userID'])) exit();
                 <input type="checkbox" id="kp-pref-toast" class="kp-noti-toggle" checked>
             </label>
         </div>
+        <p class="kp-noti-settings-note">
+            <i class="fas fa-circle-info"></i>
+            <strong>Episode alerts</strong> cover shows you have watched or marked Watching,
+            <strong>Follow alerts</strong> cover anime you follow on their page, and
+            <strong>System alerts</strong> cover badges, rank-ups and account news.
+            Turning one off stops new notifications of that kind — the ones already in your list stay.
+        </p>
     </div>
 </div>

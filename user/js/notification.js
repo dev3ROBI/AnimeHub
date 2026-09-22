@@ -48,7 +48,7 @@
 
         div.innerHTML =
             '<div class="kp-noti-icon" style="color:' + iconColor + ';">'
-          +   '<i class="' + typeIcon(n.type) + '"></i>'
+          +   '<i class="' + (n.icon || typeIcon(n.type)) + '"></i>'
           + '</div>'
           + '<div class="kp-noti-body">'
           +   '<div class="kp-noti-title">' + (n.title || 'Unknown Anime') + '</div>'
@@ -56,7 +56,7 @@
           +   '<div class="kp-noti-time">' + timeAgo(n.time) + '</div>'
           + '</div>'
           + '<div class="kp-noti-item-actions">'
-          +   '<a class="kp-noti-link" href="' + watchUrl(n.slug) + '" title="Watch now">'
+          +   '<a class="kp-noti-link" href="' + (n.url || watchUrl(n.slug)) + '" title="' + (n.type === 'episode' ? 'Watch now' : 'Open') + '">'
           +     '<i class="fas fa-play"></i>'
           +   '</a>'
           +   '<button class="kp-noti-del-btn" title="Delete">'
@@ -85,7 +85,14 @@
                 e.stopPropagation();
                 div.style.opacity = '0';
                 div.style.transform = 'translateX(20px)';
-                setTimeout(function() { div.remove(); }, 200);
+                setTimeout(function() {
+                    div.remove();
+                    // Deleting the last row must not leave an empty shell behind.
+                    if (container && !container.querySelector('.kp-noti-item')) {
+                        renderEmpty('No notifications left');
+                        if (pagination) pagination.style.display = 'none';
+                    }
+                }, 200);
                 if (!n.is_read) updateUnreadBadge(-1);
                 fetch('./includes/delete_notification.php', {
                     method: 'POST',
@@ -116,10 +123,11 @@
     }
 
     function loadNotifications() {
+        // The unread filter is applied server-side so the pages and the count
+        // describe the same set of rows.
         var url = './includes/check_notifications.php?page=' + currentPage + '&limit=15';
         if (currentFilter === 'unread') {
-            // Client-side filter for unread — we load all and filter
-            url = './includes/check_notifications.php?page=' + currentPage + '&limit=50';
+            url += '&unread=1';
         } else if (currentFilter !== 'all') {
             url += '&type=' + currentFilter;
         }
@@ -135,11 +143,6 @@
 
                 if (unreadBadge) {
                     unreadBadge.textContent = unread > 0 ? unread + ' unread' : '';
-                }
-
-                // Filter for "unread" tab
-                if (currentFilter === 'unread') {
-                    notifs = notifs.filter(function(n) { return !n.is_read; });
                 }
 
                 if (notifs.length === 0) {
@@ -201,23 +204,39 @@
                 .then(function() {
                     document.querySelectorAll('#kp-noti-list .kp-noti-unread').forEach(function(el) {
                         el.classList.remove('kp-noti-unread');
+                        var icon = el.querySelector('.kp-noti-icon');
+                        if (icon) icon.style.color = '#555';
                     });
                     if (unreadBadge) unreadBadge.textContent = '';
+                    if (typeof kpToast === 'function') kpToast('All notifications marked as read', 'success');
+                })
+                .catch(function() {
+                    if (typeof kpToast === 'function') kpToast('Could not mark notifications as read', 'error');
                 });
         });
     }
 
-    // Clear all
+    // Clear all (destructive — always asks first)
     if (clearAllBtn) {
         clearAllBtn.addEventListener('click', function() {
-            renderEmpty('All cleared');
-            if (unreadBadge) unreadBadge.textContent = '';
-            if (pagination) pagination.style.display = 'none';
+            if (!window.confirm('Remove every notification? This cannot be undone.')) return;
+
             fetch('./includes/delete_notification.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ clear_all: true })
-            });
+            })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data || !data.success) throw new Error('clear failed');
+                    renderEmpty('All cleared');
+                    if (unreadBadge) unreadBadge.textContent = '';
+                    if (pagination) pagination.style.display = 'none';
+                    if (typeof kpToast === 'function') kpToast('Notifications cleared', 'success');
+                })
+                .catch(function() {
+                    if (typeof kpToast === 'function') kpToast('Could not clear notifications', 'error');
+                });
         });
     }
 
@@ -239,7 +258,16 @@
             if (to) to.checked = !!s.toast_enabled;
         });
 
-    // Save preferences on toggle
+    var PREF_LABELS = {
+        'kp-pref-episode': 'Episode alerts',
+        'kp-pref-follow':  'Follow alerts',
+        'kp-pref-system':  'System alerts',
+        'kp-pref-sound':   'Notification sound',
+        'kp-pref-toast':   'Toast popups'
+    };
+
+    // Save preferences on toggle. The endpoint reports success, so a failure is
+    // surfaced (and the switch put back) instead of quietly pretending to save.
     document.querySelectorAll('.kp-noti-toggle').forEach(function(toggle) {
         toggle.addEventListener('change', function() {
             var payload = {
@@ -249,11 +277,27 @@
                 sound_enabled:  document.getElementById('kp-pref-sound')  ? (document.getElementById('kp-pref-sound').checked  ? 1 : 0) : 0,
                 toast_enabled:  document.getElementById('kp-pref-toast')  ? (document.getElementById('kp-pref-toast').checked  ? 1 : 0) : 1,
             };
+            var wanted = toggle.checked;
+            var label = PREF_LABELS[toggle.id] || 'Preference';
+
             fetch('./includes/notification_settings.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
-            });
+            })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data || !data.success) throw new Error('save failed');
+                    if (typeof kpToast === 'function') {
+                        kpToast(label + (wanted ? ' on' : ' off'), 'success');
+                    }
+                })
+                .catch(function() {
+                    toggle.checked = !wanted;
+                    if (typeof kpToast === 'function') {
+                        kpToast('Could not save ' + label.toLowerCase(), 'error');
+                    }
+                });
         });
     });
 

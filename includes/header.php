@@ -62,12 +62,17 @@ if (!empty($_SESSION['userID'])) {
     if (!empty($kp_settings['sticky_navbar'])) {
         $kp_body_class = 'sticky-nav-enabled';
     }
+    // "Show Ratings" is a display preference, so it rides on <body> and every
+    // card on the page (and the next ones) follows it.
+    if (isset($kp_settings['show_ratings']) && !$kp_settings['show_ratings']) {
+        $kp_body_class .= ' ratings-hidden';
+    }
 } else {
     $kp_settings = ['sticky_navbar' => 0, 'autoplay' => 1, 'show_ratings' => 1];
 }
 ?>
 
-<body class="<?= $kp_body_class ?>">
+<body class="<?= trim($kp_body_class) ?>">
     <!-- =================== Overlay =================== -->
     <div class="overlay" id="overlay"></div>
     <!-- =================== /Overlay =================== -->
@@ -109,9 +114,6 @@ if (!empty($_SESSION['userID'])) {
 
     <!-- =================== Drawer Navigation =================== -->
     <div class="drawer" id="drawer">
-        <div class="drawer-header">
-            <span class="drawer-logo">KitsuPlay</span>
-        </div>
         <ul>
             <li onclick="window.location.href='index.php'"><i class="fas fa-house" style="width: 25px;"></i> Home</li>
             <li onclick="window.location.href='genre.php'"><i class="fas fa-tags" style="width: 25px;"></i> Genres</li>
@@ -222,9 +224,15 @@ if (!empty($_SESSION['userID'])) {
             $nav_avatar_url = null;
             $nav_user_name = '';
             $nav_user_email = '';
+            $nav_rank = null;
             if (isset($_SESSION['userID'])) {
                 include_once __DIR__ . '/avatars.php';
+                // progress.php pulls in watch_time.php, so the rank helpers and
+                // progress_format_time() both come from the one include.
+                include_once __DIR__ . '/progress.php';
                 $nav_avatar_url = user_avatar_url($_SESSION['userID']);
+                // Watch-time rank, shown as a badge next to the dropdown name.
+                $nav_rank = watch_time_rank($_SESSION['userID']);
                 // Fetch user name/email for dropdown
                 try {
                     $navUserStmt = $pdo->prepare("SELECT User_Name, User_Email FROM users WHERE User_ID = ?");
@@ -253,7 +261,17 @@ if (!empty($_SESSION['userID'])) {
                         <div class="kp-user-avatar kp-user-avatar-fallback"><i class="fas fa-user"></i></div>
                         <?php endif; ?>
                         <div class="kp-user-info">
-                            <span class="kp-user-name"><?= htmlspecialchars($nav_user_name) ?></span>
+                            <div class="kp-user-name-row">
+                                <span class="kp-user-name"><?= htmlspecialchars($nav_user_name) ?></span>
+                                <?php if (!empty($nav_rank)): ?>
+                                <span class="kp-user-rank"
+                                      title="Rank: <?= htmlspecialchars($nav_rank['title']) ?> — <?= htmlspecialchars(progress_format_time($nav_rank['seconds'])) ?> watched"
+                                      style="color:<?= htmlspecialchars($nav_rank['color']) ?>; border-color:<?= htmlspecialchars($nav_rank['color']) ?>3d; background:<?= htmlspecialchars($nav_rank['color']) ?>1a;">
+                                    <i class="<?= htmlspecialchars($nav_rank['icon']) ?>"></i>
+                                    <?= htmlspecialchars($nav_rank['title']) ?>
+                                </span>
+                                <?php endif; ?>
+                            </div>
                             <span class="kp-user-email"><?= htmlspecialchars($nav_user_email) ?></span>
                         </div>
                     </div>
@@ -350,6 +368,14 @@ if (!empty($_SESSION['userID'])) {
             }
 
             // ===================== NAVIGATION DRAWER ===================== //
+            // The drawer hangs under the navbar, so its offset is measured from
+            // the live navbar box (the bar changes height between layouts).
+            function positionDrawer() {
+                const nav = document.querySelector(".navbar");
+                const top = nav ? Math.max(0, Math.round(nav.getBoundingClientRect().bottom)) : 0;
+                document.documentElement.style.setProperty("--kp-drawer-top", top + "px");
+            }
+
             menuBtn.addEventListener("click", () => {
                 const isDrawerOpen = drawer.classList.contains("active");
 
@@ -360,6 +386,7 @@ if (!empty($_SESSION['userID'])) {
                     drawer.classList.remove("active");
                     hideOverlay();
                 } else {
+                    positionDrawer();
                     drawer.classList.add("active");
                     showOverlay();
                 }
@@ -386,16 +413,42 @@ if (!empty($_SESSION['userID'])) {
                     hideOverlay();
                 } else {
                     const rect = event.target.getBoundingClientRect();
-                    popup.style.top = `${rect.bottom + 10}px`;
-                    popup.style.right = `${window.innerWidth - rect.right}px`;
+                    if (window.innerWidth <= 768) {
+                        // Phones centre the sheet in the viewport (nav_style.css)
+                        // so only the vertical anchor is needed — with priority,
+                        // because that stylesheet carries a no-JS fallback top.
+                        popup.style.setProperty("top", `${rect.bottom + 12}px`, "important");
+                        popup.style.removeProperty("right");
+                        popup.style.removeProperty("left");
+                    } else {
+                        popup.style.setProperty("top", `${rect.bottom + 10}px`, "");
+                        popup.style.setProperty("right", `${window.innerWidth - rect.right}px`, "");
+                        popup.style.removeProperty("left");
+                    }
                     popup.classList.add("active");
                     showOverlay();
                 }
             }
 
+            // Rotating the phone (or crossing the breakpoint) must not leave a
+            // panel pinned with the other layout's inline offsets.
+            window.addEventListener("resize", () => {
+                if (drawer.classList.contains("active")) positionDrawer();
+                if (window.innerWidth > 768) return;
+                [searchPopup, notificationPopup, userPopup].forEach((popup) => {
+                    popup.style.removeProperty("top");
+                    popup.style.removeProperty("right");
+                    popup.style.removeProperty("left");
+                });
+            });
+
             // ===================== ICON POPUP HANDLERS ===================== //
             searchIcon.addEventListener("click", (e) => {
                 togglePopup(searchPopup, e);
+                // Tapping the icon should leave you typing, keyboard included.
+                if (searchPopup.classList.contains("active")) {
+                    setTimeout(() => searchInput.focus(), 120);
+                }
             });
 
             bellIcon.addEventListener("click", (e) => {
@@ -685,6 +738,42 @@ if (!empty($_SESSION['userID'])) {
             const notifClearAllBtn = document.getElementById('notif-clear-all');
             let lastUnreadCount = 0;
 
+            // The two "notification behaviour" preferences from the Notification
+            // tab. They were saved but never read, so both toggles did nothing.
+            var notifPrefs = { sound_enabled: 0, toast_enabled: 1 };
+            fetch('./includes/notification_settings.php')
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    if (d && d.success && d.settings) {
+                        notifPrefs.sound_enabled = Number(d.settings.sound_enabled) ? 1 : 0;
+                        notifPrefs.toast_enabled = Number(d.settings.toast_enabled) ? 1 : 0;
+                    }
+                })
+                .catch(function() {});
+
+            /** Short two-note chime, synthesised so no audio file has to ship. */
+            function kpNotifBeep() {
+                try {
+                    var Ctx = window.AudioContext || window.webkitAudioContext;
+                    if (!Ctx) return;
+                    var ctx = new Ctx();
+                    [880, 1174].forEach(function(freq, i) {
+                        var osc  = ctx.createOscillator();
+                        var gain = ctx.createGain();
+                        osc.type = 'sine';
+                        osc.frequency.value = freq;
+                        var at = ctx.currentTime + i * 0.14;
+                        gain.gain.setValueAtTime(0.0001, at);
+                        gain.gain.exponentialRampToValueAtTime(0.16, at + 0.02);
+                        gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.13);
+                        osc.connect(gain).connect(ctx.destination);
+                        osc.start(at);
+                        osc.stop(at + 0.15);
+                    });
+                    setTimeout(function() { try { ctx.close(); } catch (e) {} }, 600);
+                } catch (e) { /* autoplay policy — silence is fine */ }
+            }
+
             function notifTypeIcon(type) {
                 switch (type) {
                     case 'episode': return 'fa-solid fa-tv';
@@ -728,6 +817,13 @@ if (!empty($_SESSION['userID'])) {
                             notifMarkAllBtn.style.display = unread > 0 ? 'flex' : 'none';
                         }
 
+                        // Dismissing everything only makes sense while there is
+                        // something to dismiss — the button was never shown before.
+                        if (notifClearAllBtn) {
+                            var knownTotal = data.total || (data.notifications || []).length;
+                            notifClearAllBtn.style.display = knownTotal > 0 ? 'flex' : 'none';
+                        }
+
                         if (notifCountLabel) {
                             var total = data.total || (data.notifications || []).length;
                             if (unread > 0) {
@@ -757,7 +853,7 @@ if (!empty($_SESSION['userID'])) {
 
                             var icon = document.createElement('div');
                             icon.className = 'kp-notif-icon';
-                            icon.innerHTML = '<i class="' + notifTypeIcon(n.type) + '"></i>';
+                            icon.innerHTML = '<i class="' + (n.icon || notifTypeIcon(n.type)) + '"></i>';
 
                             var body = document.createElement('div');
                             body.className = 'kp-notif-body';
@@ -805,7 +901,8 @@ if (!empty($_SESSION['userID'])) {
                                     if (notifBadge && unread <= 0) notifBadge.style.display = 'none';
                                     if (notifBadge && unread > 0) notifBadge.textContent = unread > 99 ? '99+' : unread;
                                 }
-                                window.location.href = './watch.php?id=' + encodeURIComponent(n.slug) + '&ep=' + n.episode;
+                                // System notes (badges, rank, welcome) carry their own link.
+                                window.location.href = n.url || ('./watch.php?id=' + encodeURIComponent(n.slug) + '&ep=' + n.episode);
                             });
 
                             notifList.appendChild(row);
@@ -814,7 +911,8 @@ if (!empty($_SESSION['userID'])) {
                         // Show toast for new notifications
                         if (unread > lastUnreadCount && lastUnreadCount > 0 && document.hidden) {
                             var newest = notifs.find(function(n) { return !n.is_read; });
-                            if (newest) showNotifToast(newest);
+                            if (newest && notifPrefs.toast_enabled) showNotifToast(newest);
+                            if (newest && notifPrefs.sound_enabled) kpNotifBeep();
                         }
                         lastUnreadCount = unread;
                     })
@@ -846,14 +944,24 @@ if (!empty($_SESSION['userID'])) {
             if (notifClearAllBtn) {
                 notifClearAllBtn.addEventListener('click', function(e) {
                     e.stopPropagation();
-                    if (notifList) notifList.innerHTML = '<div class="kp-notif-empty"><i class="fas fa-bell-slash"></i><span>No notifications yet</span></div>';
+                    // Destructive and irreversible, so it always asks first.
+                    if (!window.confirm('Remove every notification? This cannot be undone.')) return;
+
+                    if (notifList) notifList.innerHTML = '<div class="kp-notif-empty"><i class="fas fa-bell-slash"></i><span>No notifications yet</span><span class="kp-notif-empty-sub">Follow anime to get notified about new episodes</span></div>';
                     if (notifBadge) notifBadge.style.display = 'none';
                     if (notifCountLabel) notifCountLabel.style.display = 'none';
                     if (notifMarkAllBtn) notifMarkAllBtn.style.display = 'none';
+                    notifClearAllBtn.style.display = 'none';
+                    lastUnreadCount = 0;
+
                     fetch('./includes/delete_notification.php', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ clear_all: true })
+                    }).then(function() {
+                        if (typeof kpToast === 'function') kpToast('Notifications cleared', 'success');
+                    }).catch(function() {
+                        loadNotifications();
                     });
                 });
             }
@@ -861,10 +969,10 @@ if (!empty($_SESSION['userID'])) {
             function showNotifToast(n) {
                 var toast = document.createElement('div');
                 toast.className = 'kp-toast-notif';
-                toast.innerHTML = '<div class="kp-toast-notif-icon"><i class="' + notifTypeIcon(n.type) + '"></i></div>'
+                toast.innerHTML = '<div class="kp-toast-notif-icon"><i class="' + (n.icon || notifTypeIcon(n.type)) + '"></i></div>'
                     + '<div class="kp-toast-notif-body"><strong>' + (n.title || '') + '</strong><span>' + (n.message || '') + '</span></div>';
                 toast.addEventListener('click', function() {
-                    window.location.href = './watch.php?id=' + encodeURIComponent(n.slug) + '&ep=' + n.episode;
+                    window.location.href = n.url || ('./watch.php?id=' + encodeURIComponent(n.slug) + '&ep=' + n.episode);
                 });
                 var container = document.querySelector('.kp-toast-container') || (function() {
                     var c = document.createElement('div');
