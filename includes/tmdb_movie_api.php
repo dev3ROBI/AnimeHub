@@ -9,6 +9,50 @@
 include_once __DIR__ . '/tmdb_api.php';
 include_once __DIR__ . '/http.php';
 
+// ─── TMDB Genre ID → Name mapping ─────────────────────────────────────
+$TMDB_MOVIE_GENRES = [
+    28=>'Action',12=>'Adventure',16=>'Animation',35=>'Comedy',80=>'Crime',
+    99=>'Documentary',18=>'Drama',10751=>'Family',14=>'Fantasy',36=>'History',
+    27=>'Horror',10402=>'Music',9648=>'Mystery',10749=>'Romance',878=>'Science Fiction',
+    10770=>'TV Movie',53=>'Thriller',10752=>'War',37=>'Western',
+];
+$TMDB_TV_GENRES = [
+    10759=>'Action & Adventure',16=>'Animation',35=>'Comedy',80=>'Crime',
+    99=>'Documentary',18=>'Drama',10751=>'Family',10762=>'Kids',
+    9648=>'Mystery',10763=>'News',10764=>'Reality',10765=>'Sci-Fi & Fantasy',
+    10766=>'Soap',10767=>'Talk',10768=>'War & Politics',37=>'Western',
+];
+
+function tmdb_movie_genre_names(array $ids): array {
+    global $TMDB_MOVIE_GENRES;
+    $out = [];
+    foreach ($ids as $id) {
+        $id = (int)$id;
+        if (isset($TMDB_MOVIE_GENRES[$id])) $out[] = $TMDB_MOVIE_GENRES[$id];
+    }
+    return $out;
+}
+
+function tmdb_tv_genre_names(array $ids): array {
+    global $TMDB_TV_GENRES;
+    $out = [];
+    foreach ($ids as $id) {
+        $id = (int)$id;
+        if (isset($TMDB_TV_GENRES[$id])) $out[] = $TMDB_TV_GENRES[$id];
+    }
+    return $out;
+}
+
+function tmdb_movie_genre_list(): array {
+    global $TMDB_MOVIE_GENRES;
+    return $TMDB_MOVIE_GENRES;
+}
+
+function tmdb_tv_genre_list(): array {
+    global $TMDB_TV_GENRES;
+    return $TMDB_TV_GENRES;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────
 
 /** Normalize a TMDB movie result into the catalog item shape. */
@@ -44,7 +88,10 @@ function tmdb_movie_normalize($m) {
         'episode'         => 1,
         'duration'        => isset($m['runtime']) ? $m['runtime'] . 'm' : '',
         'duration_min'    => $m['runtime'] ?? null,
-        'genres'          => array_map(function($g) { return $g['name'] ?? ''; }, $m['genres'] ?? []),
+        'genres'          => !empty($m['genres'])
+            ? array_map(function($g) { return $g['name'] ?? ''; }, $m['genres'])
+            : tmdb_movie_genre_names($m['genre_ids'] ?? []),
+        'genre_ids'       => $m['genre_ids'] ?? [],
         'studios'         => [],
         'studio'          => '',
         'score'           => $m['vote_average'] ?? null,
@@ -80,6 +127,9 @@ function tmdb_tv_normalize($m) {
     foreach (($m['genres'] ?? []) as $g) {
         if (!empty($g['name'])) $genres[] = $g['name'];
     }
+    if (empty($genres) && !empty($m['genre_ids'])) {
+        $genres = tmdb_tv_genre_names($m['genre_ids']);
+    }
 
     $origin = $m['origin_country'] ?? [];
     $lang = !empty($origin) ? $origin[0] : ($m['original_language'] ?? '');
@@ -107,6 +157,7 @@ function tmdb_tv_normalize($m) {
         'duration'        => isset($m['episode_run_time'][0]) ? $m['episode_run_time'][0] . 'm' : '',
         'duration_min'    => $m['episode_run_time'][0] ?? null,
         'genres'          => $genres,
+        'genre_ids'       => $m['genre_ids'] ?? [],
         'studios'         => [],
         'studio'          => '',
         'score'           => $m['vote_average'] ?? null,
@@ -365,6 +416,88 @@ function tmdb_tv_search($term, $page = 1) {
     if (is_array($hit)) return $hit;
 
     $res = tmdb_get('/search/tv', ['query' => $term, 'page' => $page, 'include_adult' => 'false']);
+    $items = [];
+    foreach (($res['results'] ?? []) as $m) {
+        $n = tmdb_tv_normalize($m);
+        if ($n) $items[] = $n;
+    }
+    if ($items) api_cache_set($key, 'tmdb_tv', $items, CACHE_TTL_TMDB_LIST);
+    return $items;
+}
+
+// ─── Genre-filtered browsing ───────────────────────────────────────────
+
+function tmdb_movie_by_genre($genreId, $page = 1) {
+    $genreId = (int)$genreId;
+    if ($genreId <= 0) return [];
+
+    $key = api_cache_key('tmdb_movie', ['genre', $genreId, $page]);
+    $hit = api_cache_get($key);
+    if (is_array($hit)) return $hit;
+
+    $res = tmdb_get('/discover/movie', [
+        'with_genres' => $genreId,
+        'sort_by'     => 'popularity.desc',
+        'page'        => $page,
+        'language'    => 'en-US',
+    ]);
+    $items = [];
+    foreach (($res['results'] ?? []) as $m) {
+        $n = tmdb_movie_normalize($m);
+        if ($n) $items[] = $n;
+    }
+    if ($items) api_cache_set($key, 'tmdb_movie', $items, CACHE_TTL_TMDB_LIST);
+    return $items;
+}
+
+function tmdb_tv_by_genre($genreId, $page = 1) {
+    $genreId = (int)$genreId;
+    if ($genreId <= 0) return [];
+
+    $key = api_cache_key('tmdb_tv', ['genre', $genreId, $page]);
+    $hit = api_cache_get($key);
+    if (is_array($hit)) return $hit;
+
+    $res = tmdb_get('/discover/tv', [
+        'with_genres' => $genreId,
+        'sort_by'     => 'popularity.desc',
+        'page'        => $page,
+        'language'    => 'en-US',
+    ]);
+    $items = [];
+    foreach (($res['results'] ?? []) as $m) {
+        $n = tmdb_tv_normalize($m);
+        if ($n) $items[] = $n;
+    }
+    if ($items) api_cache_set($key, 'tmdb_tv', $items, CACHE_TTL_TMDB_LIST);
+    return $items;
+}
+
+function tmdb_movie_discover($page = 1, array $opts = []) {
+    $key = api_cache_key('tmdb_movie', ['discover', $page, md5(json_encode($opts))]);
+    $hit = api_cache_get($key);
+    if (is_array($hit)) return $hit;
+
+    $params = ['sort_by' => 'popularity.desc', 'page' => $page, 'language' => 'en-US'];
+    foreach ($opts as $k => $v) $params[$k] = $v;
+    $res = tmdb_get('/discover/movie', $params);
+    $items = [];
+    foreach (($res['results'] ?? []) as $m) {
+        $n = tmdb_movie_normalize($m);
+        if ($n) $items[] = $n;
+    }
+    if ($items) api_cache_set($key, 'tmdb_movie', $items, CACHE_TTL_TMDB_LIST);
+    return $items;
+}
+
+function tmdb_tv_discover($page = 1, array $opts = []) {
+    $key = api_cache_key('tmdb_tv', ['discover', $page, md5(json_encode($opts))]);
+    $hit = api_cache_get($key);
+    if (is_array($hit)) return $hit;
+
+    $params = ['sort_by' => 'popularity.desc', 'page' => $page, 'language' => 'en-US'];
+    foreach ($opts as $k => $v) $params[$k] = $v;
+    $res = tmdb_get('/discover/tv', $params);
     $items = [];
     foreach (($res['results'] ?? []) as $m) {
         $n = tmdb_tv_normalize($m);

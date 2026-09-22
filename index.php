@@ -7,6 +7,7 @@ if (!isset($_SESSION['userID'])) {
 
 include 'includes/db.php';
 include_once 'includes/functions.php';
+include_once 'includes/tmdb_movie_api.php';
 include 'includes/header.php';
 
 $home = catalog_home(20);
@@ -15,6 +16,13 @@ $trending = $home['trending'] ?? [];
 $popular  = $home['popular']  ?? [];
 $provider = $home['provider'];
 $hasData  = ($airing || $trending || $popular);
+
+// ── TMDB Movies & TV ───────────────────────────────────────────────────
+$tmdbMoviesTrending = tmdb_movie_trending(1);
+$tmdbTvTrending     = tmdb_tv_trending(1);
+$tmdbMoviesPopular  = tmdb_movie_popular(1);
+$tmdbTvPopular      = tmdb_tv_popular(1);
+$hasTmdbData = (!empty($tmdbMoviesTrending) || !empty($tmdbTvTrending));
 
 // Recently Watched
 include_once 'includes/progress.php';
@@ -87,17 +95,17 @@ if (empty($upcoming)) {
 // Top trending for sidebar
 $topTrending = array_slice($trending, 0, 10);
 
-// Hero slider pool
+// Hero slider pool (anime + movies + TV)
 $sliderPool = [];
 $seenIds = [];
-foreach (array_merge($trending, $airing) as $candidate) {
+foreach (array_merge($trending, $airing, $tmdbMoviesTrending, $tmdbTvTrending) as $candidate) {
     $id = $candidate['id'] ?? null;
     if (empty($id) || isset($seenIds[$id])) continue;
     $seenIds[$id] = true;
     $sliderPool[] = $candidate;
 }
 usort($sliderPool, fn($a, $b) => (int)empty($b['banner']) <=> (int)empty($a['banner']));
-$slides = array_slice($sliderPool, 0, 8);
+$slides = array_slice($sliderPool, 0, 10);
 
 // ── Derived extras ─────────────────────────────────────────────────────
 // Quick stats and the Top 10 are computed from the rows above, so these
@@ -305,6 +313,36 @@ $quickStats = [
                             </div>
                         </a>
                     </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+        <?php endif; ?>
+
+        <?php if (!empty($tmdbMoviesTrending)): ?>
+        <!-- Trending Movies -->
+        <div class="kp-section">
+            <div class="kp-section-head">
+                <h2><span class="kp-head-bar"></span>Trending Movies</h2>
+                <a href="./movies.php?section=trending" class="kp-view-all">View all <i class="fas fa-arrow-right"></i></a>
+            </div>
+            <div class="kp-anime-grid">
+                <?php foreach (array_slice($tmdbMoviesTrending, 0, 12) as $movie): ?>
+                    <?= render_anime_card($movie) ?>
+                <?php endforeach; ?>
+            </div>
+        </div>
+        <?php endif; ?>
+
+        <?php if (!empty($tmdbTvTrending)): ?>
+        <!-- Trending TV Series -->
+        <div class="kp-section">
+            <div class="kp-section-head">
+                <h2><span class="kp-head-bar"></span>Trending TV Series</h2>
+                <a href="./tv.php?section=trending" class="kp-view-all">View all <i class="fas fa-arrow-right"></i></a>
+            </div>
+            <div class="kp-anime-grid">
+                <?php foreach (array_slice($tmdbTvTrending, 0, 12) as $show): ?>
+                    <?= render_anime_card($show) ?>
                 <?php endforeach; ?>
             </div>
         </div>

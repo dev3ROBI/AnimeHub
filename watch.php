@@ -270,8 +270,8 @@ include_once './includes/header.php';
             <div id="artplayer"></div>
             <div id="embedplayer" style="display:none;">
                 <iframe id="embed-frame" src="about:blank" allowfullscreen frameborder="0"
-                        referrerpolicy="origin"
-                        allow="autoplay; fullscreen; encrypted-media; picture-in-picture"></iframe>
+                        referrerpolicy="no-referrer-when-downgrade"
+                        allow="autoplay; fullscreen; encrypted-media; picture-in-picture; encrypted-media"></iframe>
             </div>
 
             <?php if ($is_api): ?>
@@ -308,6 +308,7 @@ include_once './includes/header.php';
                 <h3>স্ট্রিম লোড হয়নি</h3>
                 <p id="kp-error-text"></p>
                 <button type="button" id="kp-error-retry"><i class="fas fa-redo"></i> আবার চেষ্টা করুন</button>
+                <button type="button" id="kp-error-open-tab" style="margin-left:10px; background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.2); color:#fff; padding:8px 16px; border-radius:8px; cursor:pointer;"><i class="fas fa-external-link-alt"></i> New Tab-এ খুলুন</button>
             </div>
 
             <!-- Auto-play next episode overlay -->
@@ -362,6 +363,48 @@ include_once './includes/header.php';
                 position: relative;
                 overflow: visible;
             }
+
+            .tmdb-seasons-wrap { margin-bottom: 8px; }
+            .tmdb-seasons-wrap h4 { margin-bottom: 8px; }
+            .tmdb-season-tabs {
+                display: flex;
+                gap: 6px;
+                flex-wrap: wrap;
+            }
+            .tmdb-season-tab {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 2px;
+                padding: 8px 14px;
+                border-radius: 8px;
+                border: 1px solid rgba(255,255,255,.12);
+                background: rgba(255,255,255,.06);
+                color: #ccc;
+                cursor: pointer;
+                transition: all .2s;
+                font-size: 13px;
+                line-height: 1.2;
+            }
+            .tmdb-season-tab:hover {
+                background: rgba(255,46,99,.15);
+                border-color: rgba(255,46,99,.3);
+                color: #fff;
+            }
+            .tmdb-season-tab.active {
+                background: rgba(255,46,99,.2);
+                border-color: #ff2e63;
+                color: #fff;
+                box-shadow: 0 0 10px rgba(255,46,99,.25);
+            }
+            .tmdb-season-tab strong {
+                font-size: 13px;
+                font-weight: 600;
+            }
+            .tmdb-season-ep-count {
+                font-size: 11px;
+                opacity: .6;
+            }
         </style>
         <?php endif; ?>
     </div>
@@ -375,7 +418,14 @@ include_once './includes/header.php';
 
 
         <?php if ($is_api): ?>
+            <?php if ($is_tmdb_tv): ?>
+            <div class="tmdb-seasons-wrap" id="tmdb-seasons-wrap">
+                <h4>Seasons<?= $episodes_total ? ' (' . (int)$episodes_total . ')' : '' ?></h4>
+                <div class="tmdb-season-tabs" id="tmdb-season-tabs"></div>
+            </div>
+            <?php else: ?>
             <h4>Episodes<?= $episodes_total ? ' (' . (int)$episodes_total . ')' : '' ?></h4>
+            <?php endif; ?>
             <?php if (!empty($episodes_list)): ?>
                 <input type="text" id="ep-search" placeholder="Filter episode…" style="margin-bottom:6px;">
             <?php endif; ?>
@@ -602,7 +652,8 @@ include_once './includes/header.php';
             isTmdbTv: <?= $is_tmdb_tv ? 'true' : 'false' ?>,
             tmdbType: '<?= $is_tmdb_movie ? 'movie' : ($is_tmdb_tv ? 'tv' : '') ?>',
             tmdbId: <?= $is_tmdb ? (int)($parsed['id'] ?? 0) : 'null' ?>,
-            season: <?= $season_id ? (int)$season_id : 'null' ?>,
+            season: <?= $season_id ? (int)$season_id : '1' ?>,
+            currentSeason: <?= $season_id ? (int)$season_id : '1' ?>,
             resume: <?= json_encode($resume ?: null, JSON_UNESCAPED_UNICODE) ?>,
             episodes: <?= json_encode(
                 array_map(fn($e) => ['n' => (int)$e['number'], 't' => (string)($e['title'] ?? ''), 's' => (int)($e['season'] ?? 1)], $episodes_list),
@@ -909,11 +960,41 @@ include_once './includes/header.php';
 
         function showNextEpisode() {
             var nextEp = currentEp + 1;
+            var nextSeason = KP.currentSeason;
+
+            // For TMDB TV, check if next episode exists in current season first
+            if (KP.isTmdbTv) {
+                var currentSeasonEps = (KP.episodes || []).filter(function (e) {
+                    return (e.s || 1) === nextSeason;
+                });
+                var maxEpInSeason = currentSeasonEps.length ? Math.max.apply(null, currentSeasonEps.map(function (e) { return e.n; })) : 0;
+
+                if (nextEp > maxEpInSeason) {
+                    // Move to next season
+                    var allSeasons = [];
+                    var seen = {};
+                    (KP.episodes || []).forEach(function (e) {
+                        var s = e.s || 1;
+                        if (!seen[s]) { seen[s] = true; allSeasons.push(s); }
+                    });
+                    allSeasons.sort(function (a, b) { return a - b; });
+                    var idx = allSeasons.indexOf(nextSeason);
+                    if (idx >= 0 && idx < allSeasons.length - 1) {
+                        nextSeason = allSeasons[idx + 1];
+                        nextEp = 1;
+                    } else {
+                        return; // No more seasons
+                    }
+                }
+            }
+
             var hasMore = !KP.total || nextEp <= KP.total;
             if (!hasMore || !nextOverlay) return;
 
-            var meta = (KP.episodes || []).find(function (e) { return e.n === nextEp; });
-            var title = meta && meta.t ? meta.t : ('Episode ' + nextEp);
+            var meta = (KP.episodes || []).find(function (e) {
+                return e.n === nextEp && (e.s || 1) === nextSeason;
+            });
+            var title = meta && meta.t ? meta.t : ('S' + nextSeason + ' E' + nextEp);
 
             if (nextTitle) nextTitle.textContent = title;
 
@@ -927,6 +1008,10 @@ include_once './includes/header.php';
             // Build URL for next episode
             var url = new URL(window.location.href);
             url.searchParams.set('ep', nextEp);
+            if (KP.isTmdbTv) {
+                url.searchParams.set('season', nextSeason);
+                KP.currentSeason = nextSeason;
+            }
             url.searchParams.delete('lang');
             var nextUrl = url.toString();
 
@@ -1191,13 +1276,18 @@ include_once './includes/header.php';
             if (embedBox) embedBox.style.display = 'block';
             setState('loading', { message: 'সার্ভার লোড হচ্ছে…' });
 
+            if (!embedFrame) return;
+            if (!url || url === 'about:blank' || url === 'null' || url === '') {
+                setState('error', { message: 'No embed URL found. Try a different server below.' });
+                return;
+            }
+
+            console.log('[KP] playEmbed loading:', url);
             let settled = false;
             const watchdog = setTimeout(function () {
                 if (settled) return;
-                setState('error', { message: 'সার্ভার সময়মতো সাড়া দেয়নি। নিচ থেকে অন্য সার্ভার বেছে নিন।' });
-            }, 25000);
-
-            if (!embedFrame) return;
+                setState('error', { message: 'সার্ভার সময়মতো সাড়া দেয়নি। নিচ থেকে অন্য সার্ভার বেছে নিন বা ব্রাউজারে সরাসরি খুলুন।' });
+            }, 20000);
 
             embedFrame.onload = function () {
                 const src = embedFrame.getAttribute('src') || '';
@@ -1207,12 +1297,14 @@ include_once './includes/header.php';
                 setState('playing');
                 saveHistory(currentEp);
 
-                // The embed only loads because the user asked to play, so the
-                // watch clock starts here. Its playhead is unreachable, which
-                // is exactly why the clock exists.
                 playerActive = true;
                 beginPlayClock();
                 startProgressLoop(currentEp);
+            };
+            embedFrame.onerror = function () {
+                settled = true;
+                clearTimeout(watchdog);
+                setState('error', { message: 'সার্ভার লোড হয়নি। অন্য সার্ভার বেছে নিন।' });
             };
             embedFrame.src = url;
         }
@@ -1229,7 +1321,7 @@ include_once './includes/header.php';
             }
 
             var filtered = lastServers.filter(function (s) {
-                return s.lang === currentMode || s.lang === 'any';
+                return !s.lang || s.lang === currentMode || s.lang === 'any';
             });
 
             if (!filtered.length) {
@@ -1248,7 +1340,7 @@ include_once './includes/header.php';
                 var btn = document.createElement('button');
                 btn.className = 'server-chip';
                 btn.dataset.key = server.key;
-                var langTag = server.lang === 'any' ? '' : ' [' + server.lang.toUpperCase() + ']';
+                var langTag = (!server.lang || server.lang === 'any') ? '' : ' [' + server.lang.toUpperCase() + ']';
                 btn.textContent = (server.label || server.key || 'HD').replace(/ · /g, ' ') + langTag;
                 btn.addEventListener('click', function () {
                     document.querySelectorAll('.server-chip').forEach(function (b) {
@@ -1267,6 +1359,9 @@ include_once './includes/header.php';
         function renderLangToggle() {
             if (!langEl) return;
             langEl.innerHTML = '';
+
+            // TMDB movies/TV use external embeds with their own language controls
+            if (KP.isTmdbMovie || KP.isTmdbTv) return;
 
             /* SUB button — Japanese audio + English sub */
             var subBtn = document.createElement('button');
@@ -1347,7 +1442,11 @@ include_once './includes/header.php';
             const epTitle = meta && meta.t ? meta.t : '';
 
             if (gateEpEl) {
-                gateEpEl.textContent = 'Episode ' + currentEp + (KP.total ? ' of ' + KP.total : '');
+                if (KP.isTmdbTv) {
+                    gateEpEl.textContent = 'Season ' + KP.currentSeason + ' · Episode ' + currentEp + (KP.total ? ' of ' + KP.total : '');
+                } else {
+                    gateEpEl.textContent = 'Episode ' + currentEp + (KP.total ? ' of ' + KP.total : '');
+                }
             }
             if (gateTitleEl) {
                 gateTitleEl.textContent = epTitle ? (KP.title + ' — ' + epTitle) : KP.title;
@@ -1434,7 +1533,7 @@ include_once './includes/header.php';
             }
 
             if (KP.isTmdbTv) {
-                var tvParams = new URLSearchParams({ tmdb: KP.tmdbId, season: KP.season || 1, episode: ep });
+                var tvParams = new URLSearchParams({ tmdb: KP.tmdbId, season: KP.currentSeason || 1, episode: ep });
                 return fetch('./includes/get_tv_stream.php?' + tvParams.toString())
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
@@ -1614,16 +1713,23 @@ include_once './includes/header.php';
             container.innerHTML = '';
 
             const list = Array.isArray(KP.episodes) ? KP.episodes : [];
-            if (!list.length) {
+            const isTmdbTv = KP.isTmdbTv;
+            const filtered = isTmdbTv
+                ? list.filter(function (e) { return (e.s || 1) === KP.currentSeason; })
+                : list;
+
+            if (!filtered.length) {
                 const p = document.createElement('p');
                 p.style.cssText = 'color:#aaa; padding:8px;';
-                p.textContent = 'এপিসোড লিস্ট পাওয়া যায়নি — নিচে ম্যানুয়ালি নম্বর দিন।';
+                p.textContent = isTmdbTv
+                    ? 'এই সিজনে কোনো এপিসোড পাওয়া যায়নি।'
+                    : 'এপিসোড লিস্ট পাওয়া যায়নি — নিচে ম্যানুয়ালি নম্বর দিন।';
                 container.appendChild(p);
                 return;
             }
 
             const frag = document.createDocumentFragment();
-            list.forEach(function (ep) { frag.appendChild(episodeElement(ep.n, ep.t)); });
+            filtered.forEach(function (ep) { frag.appendChild(episodeElement(ep.n, ep.t)); });
             container.appendChild(frag);
 
             Object.keys(resumeCache).forEach(function (ep) {
@@ -1634,6 +1740,61 @@ include_once './includes/header.php';
             if (active) active.scrollIntoView({ block: 'center' });
 
             loadAllProgress();
+        }
+
+        // ─── Season tabs for TMDB TV ──────────────────────────────
+        function buildSeasonTabs() {
+            if (!KP.isTmdbTv) return;
+            const tabsEl = document.getElementById('tmdb-season-tabs');
+            if (!tabsEl) return;
+            tabsEl.innerHTML = '';
+
+            var seasons = {};
+            (KP.episodes || []).forEach(function (ep) {
+                var s = ep.s || 1;
+                if (!seasons[s]) seasons[s] = 0;
+                seasons[s]++;
+            });
+
+            var keys = Object.keys(seasons).map(Number).sort(function (a, b) { return a - b; });
+            if (!keys.length) {
+                document.getElementById('tmdb-seasons-wrap').style.display = 'none';
+                return;
+            }
+
+            keys.forEach(function (sNum) {
+                var btn = document.createElement('button');
+                btn.className = 'tmdb-season-tab' + (sNum === KP.currentSeason ? ' active' : '');
+                btn.dataset.season = sNum;
+                btn.innerHTML = '<strong>Season ' + sNum + '</strong><span class="tmdb-season-ep-count">' + seasons[sNum] + ' eps</span>';
+                btn.addEventListener('click', function () {
+                    if (KP.currentSeason === sNum) return;
+                    KP.currentSeason = sNum;
+
+                    document.querySelectorAll('.tmdb-season-tab').forEach(function (b) { b.classList.remove('active'); });
+                    btn.classList.add('active');
+
+                    // Update gate label
+                    var gateEpEl = document.getElementById('kp-gate-ep');
+                    if (gateEpEl) gateEpEl.textContent = 'Season ' + sNum;
+
+                    // Update URL
+                    var url = new URL(window.location.href);
+                    url.searchParams.set('season', sNum);
+                    url.searchParams.delete('ep');
+                    history.replaceState({}, '', url.toString());
+
+                    currentEp = 1;
+                    payload = null;
+            buildSeasonTabs();
+            buildEpisodeList();
+
+                    // Auto-play first episode of the season
+                    var firstEp = document.querySelector('#anikuro-episode-container .episode');
+                    if (firstEp) selectEpisode(firstEp, 1);
+                });
+                tabsEl.appendChild(btn);
+            });
         }
 
         const epSearch = document.getElementById('ep-search');
@@ -1805,6 +1966,14 @@ include_once './includes/header.php';
             if (errorRetry) {
                 errorRetry.addEventListener('click', function () {
                     resolve(currentEp, { autoplay: true, force: true });
+                });
+            }
+            const openTabBtn = document.getElementById('kp-error-open-tab');
+            if (openTabBtn) {
+                openTabBtn.addEventListener('click', function () {
+                    if (payload && payload.url) {
+                        window.open(payload.url, '_blank');
+                    }
                 });
             }
 

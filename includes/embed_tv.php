@@ -3,8 +3,6 @@
  * TV embed provider — multi-source fallback with season/episode.
  */
 
-include_once __DIR__ . '/http.php';
-
 function tv_embed_resolve($tmdbId, $season, $episode) {
     $tmdbId  = (int)$tmdbId;
     $season  = (int)$season;
@@ -14,29 +12,19 @@ function tv_embed_resolve($tmdbId, $season, $episode) {
     $providers = $GLOBALS['TV_EMBED_PROVIDERS'] ?? [];
     if (!$providers) return null;
 
-    $candidates = [];
     foreach ($providers as $key => $p) {
-        $url = str_replace(
-            ['{tmdb}', '{season}', '{episode}'],
-            [$tmdbId, $season, $episode],
-            $p['url']
-        );
-        $candidates[] = [
+        return [
             'key'   => $key,
             'label' => $p['label'] ?? $key,
-            'url'   => $url,
+            'mode'  => 'embed',
+            'url'   => str_replace(
+                ['{tmdb}', '{season}', '{episode}'],
+                [$tmdbId, $season, $episode],
+                $p['url']
+            ),
         ];
     }
-
-    // Try each provider with a quick HEAD check
-    foreach ($candidates as $c) {
-        $check = api_http($c['url'], ['timeout' => 8, 'method' => 'HEAD', 'label' => 'embed:' . $c['key']]);
-        if (is_array($check) && ($check['status'] ?? 0) >= 200 && ($check['status'] ?? 0) < 400) {
-            return $c;
-        }
-    }
-
-    return !empty($candidates) ? $candidates[0] : null;
+    return null;
 }
 
 function tv_embed_all($tmdbId, $season, $episode) {
@@ -51,6 +39,7 @@ function tv_embed_all($tmdbId, $season, $episode) {
         $list[] = [
             'key'   => $key,
             'label' => $p['label'] ?? $key,
+            'mode'  => 'embed',
             'url'   => str_replace(
                 ['{tmdb}', '{season}', '{episode}'],
                 [$tmdbId, $season, $episode],
