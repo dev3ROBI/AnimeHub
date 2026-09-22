@@ -175,21 +175,33 @@ if (!function_exists('catalog_order')) {
 // ─── Movie embed providers (fallback chain) ──────────────────────────
 if (!isset($GLOBALS['MOVIE_EMBED_PROVIDERS'])) {
     $GLOBALS['MOVIE_EMBED_PROVIDERS'] = [
-        'vidsrc-to'   => ['label' => 'VidSrc',     'url' => 'https://vidsrc.to/embed/movie/{tmdb}'],
-        'vidsrcme-su' => ['label' => 'VidSrc (me)', 'url' => 'https://vidsrcme.su/embed/movie/{tmdb}'],
-        'vidsrc-link' => ['label' => 'VidSrc (link)','url' => 'https://vidsrc.link/embed/movie/{tmdb}'],
-        'vid-src-top' => ['label' => 'VidSrc (top)','url' => 'https://vid-src.top/embed/movie/{tmdb}'],
-        'vidsrc-tw'   => ['label' => 'VidSrc (tw)', 'url' => 'https://vidsrc.tw/embed/movie/{tmdb}'],
+        // === Hindi/Asian focused ===
+        'vidcore-org'  => ['label' => 'VidCore',    'url' => 'https://vidcore.org/embed/movie/{tmdb}'],
+        // === Core verified providers ===
+        'vidfast'      => ['label' => 'VidFast',    'url' => 'https://vidfast.pro/movie/{tmdb}?autoPlay=true'],
+        'vidlink'      => ['label' => 'VidLink',    'url' => 'https://vidlink.pro/movie/{tmdb}'],
+        'vidsrc-pm'    => ['label' => 'VidSrc (pm)','url' => 'https://vidsrc.pm/embed/movie/{tmdb}'],
+        'vidsrc-to'    => ['label' => 'VidSrc (to)','url' => 'https://vidsrc.to/embed/movie/{tmdb}'],
+        'vidsrc-cc'    => ['label' => 'VidSrc (cc)','url' => 'https://vidsrc.cc/v2/embed/movie/{tmdb}'],
+        '2embed-skin'  => ['label' => '2Embed',     'url' => 'https://www.2embed.skin/embed/{tmdb}'],
+        '2embed-cc'    => ['label' => '2Embed (cc)','url' => 'https://www.2embed.cc/embed/{tmdb}'],
+        'nhdapi'       => ['label' => 'NHD',        'url' => 'https://nhdapi.com/movie/{tmdb}'],
     ];
 }
 
 // ─── TV embed providers (fallback chain) ─────────────────────────────
 if (!isset($GLOBALS['TV_EMBED_PROVIDERS'])) {
     $GLOBALS['TV_EMBED_PROVIDERS'] = [
-        'vidsrc-to'   => ['label' => 'VidSrc',     'url' => 'https://vidsrc.to/embed/tv/{tmdb}/{season}/{episode}'],
-        'vidsrcme-su' => ['label' => 'VidSrc (me)', 'url' => 'https://vidsrcme.su/embed/tv/{tmdb}/{season}/{episode}'],
-        'vidsrc-link' => ['label' => 'VidSrc (link)','url' => 'https://vidsrc.link/embed/tv/{tmdb}/{season}/{episode}'],
-        'vid-src-top' => ['label' => 'VidSrc (top)','url' => 'https://vid-src.top/embed/tv/{tmdb}/{season}/{episode}'],
-        'vidsrc-tw'   => ['label' => 'VidSrc (tw)', 'url' => 'https://vidsrc.tw/embed/tv/{tmdb}/{season}/{episode}'],
+        // === Hindi/Asian focused ===
+        'vidcore-org'  => ['label' => 'VidCore',    'url' => 'https://vidcore.org/embed/tv/{tmdb}/{season}/{episode}'],
+        // === Core verified providers ===
+        'vidfast'      => ['label' => 'VidFast',    'url' => 'https://vidfast.pro/tv/{tmdb}/{season}/{episode}?autoPlay=true'],
+        'vidlink'      => ['label' => 'VidLink',    'url' => 'https://vidlink.pro/tv/{tmdb}/{season}/{episode}'],
+        'vidsrc-pm'    => ['label' => 'VidSrc (pm)','url' => 'https://vidsrc.pm/embed/tv/{tmdb}/{season}/{episode}'],
+        'vidsrc-to'    => ['label' => 'VidSrc (to)','url' => 'https://vidsrc.to/embed/tv/{tmdb}/{season}/{episode}'],
+        'vidsrc-cc'    => ['label' => 'VidSrc (cc)','url' => 'https://vidsrc.cc/v2/embed/tv/{tmdb}/{season}/{episode}'],
+        '2embed-skin'  => ['label' => '2Embed',     'url' => 'https://www.2embed.skin/embedtv/{tmdb}&s={season}&e={episode}'],
+        '2embed-cc'    => ['label' => '2Embed (cc)','url' => 'https://www.2embed.cc/embedtv/{tmdb}&s={season}&e={episode}'],
+        'nhdapi'       => ['label' => 'NHD',        'url' => 'https://nhdapi.com/tv/{tmdb}/{season}/{episode}'],
     ];
 }
