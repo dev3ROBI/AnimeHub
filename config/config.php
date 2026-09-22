@@ -175,33 +175,37 @@ if (!function_exists('catalog_order')) {
 // ─── Movie embed providers (fallback chain) ──────────────────────────
 if (!isset($GLOBALS['MOVIE_EMBED_PROVIDERS'])) {
     $GLOBALS['MOVIE_EMBED_PROVIDERS'] = [
-        // === Hindi/Asian focused ===
-        'vidcore-org'  => ['label' => 'VidCore',    'url' => 'https://vidcore.org/embed/movie/{tmdb}'],
-        // === Core verified providers ===
+        // === Priority: NHD first ===
+        'nhdapi'       => ['label' => 'NHD',        'url' => 'https://nhdapi.com/movie/{tmdb}'],
+        // === Then VidFast/VidLink ===
         'vidfast'      => ['label' => 'VidFast',    'url' => 'https://vidfast.pro/movie/{tmdb}?autoPlay=true'],
         'vidlink'      => ['label' => 'VidLink',    'url' => 'https://vidlink.pro/movie/{tmdb}'],
+        // === Then VidSrc ===
         'vidsrc-pm'    => ['label' => 'VidSrc (pm)','url' => 'https://vidsrc.pm/embed/movie/{tmdb}'],
         'vidsrc-to'    => ['label' => 'VidSrc (to)','url' => 'https://vidsrc.to/embed/movie/{tmdb}'],
         'vidsrc-cc'    => ['label' => 'VidSrc (cc)','url' => 'https://vidsrc.cc/v2/embed/movie/{tmdb}'],
+        // === Fallback ===
+        'vidcore-org'  => ['label' => 'VidCore',    'url' => 'https://vidcore.org/embed/movie/{tmdb}'],
         '2embed-skin'  => ['label' => '2Embed',     'url' => 'https://www.2embed.skin/embed/{tmdb}'],
         '2embed-cc'    => ['label' => '2Embed (cc)','url' => 'https://www.2embed.cc/embed/{tmdb}'],
-        'nhdapi'       => ['label' => 'NHD',        'url' => 'https://nhdapi.com/movie/{tmdb}'],
     ];
 }
 
 // ─── TV embed providers (fallback chain) ─────────────────────────────
 if (!isset($GLOBALS['TV_EMBED_PROVIDERS'])) {
     $GLOBALS['TV_EMBED_PROVIDERS'] = [
-        // === Hindi/Asian focused ===
-        'vidcore-org'  => ['label' => 'VidCore',    'url' => 'https://vidcore.org/embed/tv/{tmdb}/{season}/{episode}'],
-        // === Core verified providers ===
+        // === Priority: NHD first ===
+        'nhdapi'       => ['label' => 'NHD',        'url' => 'https://nhdapi.com/tv/{tmdb}/{season}/{episode}'],
+        // === Then VidFast/VidLink ===
         'vidfast'      => ['label' => 'VidFast',    'url' => 'https://vidfast.pro/tv/{tmdb}/{season}/{episode}?autoPlay=true'],
         'vidlink'      => ['label' => 'VidLink',    'url' => 'https://vidlink.pro/tv/{tmdb}/{season}/{episode}'],
+        // === Then VidSrc ===
         'vidsrc-pm'    => ['label' => 'VidSrc (pm)','url' => 'https://vidsrc.pm/embed/tv/{tmdb}/{season}/{episode}'],
         'vidsrc-to'    => ['label' => 'VidSrc (to)','url' => 'https://vidsrc.to/embed/tv/{tmdb}/{season}/{episode}'],
         'vidsrc-cc'    => ['label' => 'VidSrc (cc)','url' => 'https://vidsrc.cc/v2/embed/tv/{tmdb}/{season}/{episode}'],
+        // === Fallback ===
+        'vidcore-org'  => ['label' => 'VidCore',    'url' => 'https://vidcore.org/embed/tv/{tmdb}/{season}/{episode}'],
         '2embed-skin'  => ['label' => '2Embed',     'url' => 'https://www.2embed.skin/embedtv/{tmdb}&s={season}&e={episode}'],
         '2embed-cc'    => ['label' => '2Embed (cc)','url' => 'https://www.2embed.cc/embedtv/{tmdb}&s={season}&e={episode}'],
-        'nhdapi'       => ['label' => 'NHD',        'url' => 'https://nhdapi.com/tv/{tmdb}/{season}/{episode}'],
     ];
 }

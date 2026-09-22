@@ -172,6 +172,11 @@ if ($is_api && $anime_data) {
     $language       = 'JP';
     $country        = 'Japan';
     $episodes_total = (int)($anime_data['episodes'] ?: $anime_data['aired_episodes'] ?: 0);
+    $season_count = 0;
+    if ($is_tmdb_tv && !empty($episodes_list)) {
+        $season_numbers = array_unique(array_map(fn($e) => (int)($e['season'] ?? 1), $episodes_list));
+        $season_count = count($season_numbers);
+    }
     $anilist_id     = $anime_data['anilist_id'] ?? null;
     $mal_id         = $anime_data['mal_id'] ?? null;
     $relations      = $anime_data['relations'] ?? [];
@@ -278,6 +283,10 @@ include_once './includes/header.php';
 <?php else: ?>
 
 <div class="watch-wrapper">
+    <div id="kp-page-loader">
+        <div class="kp-loader-spinner"></div>
+        <p>Loading servers &amp; data…</p>
+    </div>
     <div class="video-box">
         <div id="anime-player-container" class="kp-player-shell" data-embed-url="<?= kp_e($video_url ?? '') ?>">
             <div id="artplayer"></div>
@@ -381,16 +390,19 @@ include_once './includes/header.php';
             .tmdb-seasons-wrap h4 { margin-bottom: 8px; }
             .tmdb-season-tabs {
                 display: flex;
-                gap: 6px;
-                flex-wrap: wrap;
+                gap: 8px;
+                overflow-x: auto;
+                padding-bottom: 4px;
+                scrollbar-width: none;
             }
+            .tmdb-season-tabs::-webkit-scrollbar { display: none; }
             .tmdb-season-tab {
                 display: flex;
                 flex-direction: column;
                 align-items: center;
                 gap: 2px;
-                padding: 8px 14px;
-                border-radius: 8px;
+                padding: 10px 18px;
+                border-radius: 20px;
                 border: 1px solid rgba(255,255,255,.12);
                 background: rgba(255,255,255,.06);
                 color: #ccc;
@@ -398,6 +410,8 @@ include_once './includes/header.php';
                 transition: all .2s;
                 font-size: 13px;
                 line-height: 1.2;
+                white-space: nowrap;
+                flex-shrink: 0;
             }
             .tmdb-season-tab:hover {
                 background: rgba(255,46,99,.15);
@@ -405,10 +419,10 @@ include_once './includes/header.php';
                 color: #fff;
             }
             .tmdb-season-tab.active {
-                background: rgba(255,46,99,.2);
+                background: linear-gradient(135deg, rgba(255,46,99,.25), rgba(217,4,41,.15));
                 border-color: #ff2e63;
                 color: #fff;
-                box-shadow: 0 0 10px rgba(255,46,99,.25);
+                box-shadow: 0 0 14px rgba(255,46,99,.3);
             }
             .tmdb-season-tab strong {
                 font-size: 13px;
@@ -420,24 +434,195 @@ include_once './includes/header.php';
             }
 
             .kp-movie-info-card {
-                background: rgba(255,255,255,.06);
-                border: 1px solid rgba(255,255,255,.1);
-                border-radius: 10px;
-                padding: 14px;
+                background: linear-gradient(135deg, rgba(255,46,99,.08), rgba(255,255,255,.03));
+                border: 1px solid rgba(255,46,99,.15);
+                border-radius: 12px;
+                padding: 16px;
                 margin-bottom: 12px;
+            }
+            .kp-movie-info-card .kp-movie-info-title {
+                font-size: 11px; font-weight: 600; color: #ff2e63;
+                text-transform: uppercase; letter-spacing: .5px;
+                margin-bottom: 10px;
+                display: flex; align-items: center; gap: 6px;
             }
             .kp-movie-info-row {
                 display: flex;
                 align-items: center;
                 gap: 10px;
-                padding: 6px 0;
+                padding: 7px 10px;
                 color: #ccc;
                 font-size: 13px;
+                border-radius: 8px;
+                background: rgba(0,0,0,.2);
+                margin-bottom: 4px;
             }
+            .kp-movie-info-row:last-child { margin-bottom: 0; }
             .kp-movie-info-row i {
                 color: #ff2e63;
-                width: 18px;
+                width: 16px;
+                font-size: 12px;
                 text-align: center;
+            }
+
+            /* Loading overlay */
+            #kp-page-loader {
+                position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+                background: rgba(10,10,14,.92);
+                backdrop-filter: blur(12px);
+                z-index: 9999;
+                display: flex; flex-direction: column;
+                align-items: center; justify-content: center;
+                gap: 18px;
+                transition: opacity .4s;
+            }
+            #kp-page-loader .kp-loader-spinner {
+                width: 42px; height: 42px;
+                border: 3px solid rgba(255,255,255,.12);
+                border-top-color: #ff2e63;
+                border-radius: 50%;
+                animation: kp-spin .7s linear infinite;
+            }
+            @keyframes kp-spin { to { transform: rotate(360deg); } }
+            #kp-page-loader p { color: #aaa; font-size: 14px; }
+
+            /* Description card */
+            .watch-desc-card {
+                background: linear-gradient(135deg, rgba(255,46,99,.06), rgba(255,255,255,.03));
+                border: 1px solid rgba(255,255,255,.08);
+                border-radius: 12px;
+                padding: 16px;
+                margin-bottom: 16px;
+            }
+            .watch-desc-card h4 {
+                color: #ff2e63; font-size: 13px; font-weight: 600;
+                text-transform: uppercase; letter-spacing: .5px;
+                margin-bottom: 10px;
+                display: flex; align-items: center; gap: 6px;
+            }
+            .watch-desc-card .desc-text {
+                color: #ccc; font-size: 13.5px; line-height: 1.65;
+                max-height: 4.5em; overflow: hidden;
+                transition: max-height .3s;
+            }
+            .watch-desc-card .desc-text.expanded { max-height: 2000px; }
+            .watch-desc-card .desc-toggle {
+                background: none; border: none; color: #ff2e63;
+                font-size: 12px; cursor: pointer; margin-top: 6px;
+                font-weight: 500;
+            }
+            .watch-desc-meta {
+                display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+                gap: 8px; margin-top: 12px; padding-top: 12px;
+                border-top: 1px solid rgba(255,255,255,.06);
+            }
+            .watch-desc-meta .meta-item {
+                display: flex; align-items: center; gap: 6px;
+                font-size: 12px; color: #aaa;
+            }
+            .watch-desc-meta .meta-item i { color: #ff2e63; font-size: 11px; width: 14px; text-align: center; }
+            .watch-desc-meta .meta-item span { color: #ddd; }
+
+            /* Related content section */
+            .watch-section-head {
+                display: flex; align-items: center; gap: 10px;
+                margin: 24px 0 14px;
+            }
+            .watch-section-head .kp-head-bar {
+                width: 4px; height: 20px; border-radius: 2px;
+                background: linear-gradient(180deg, #ff2e63, #d90429);
+            }
+            .watch-section-head h3 {
+                font-size: 16px; font-weight: 700; color: #eee; margin: 0;
+            }
+
+            /* Related / Recommendations vertical grid on watch page */
+            .watch-related-section { margin-bottom: 28px; }
+            .watch-related-section .show-item-con {
+                display: grid !important;
+                grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+                gap: 14px 10px;
+                padding: 4px 0 12px;
+            }
+            .watch-related-section .show-item-con .watch-item {
+                min-width: 0;
+            }
+            .watch-related-section .show-item-con .movie-card {
+                border-radius: 10px;
+                background: rgba(255,255,255,.04);
+                border: 1px solid rgba(255,255,255,.06);
+                transition: transform .25s, border-color .25s;
+            }
+            .watch-related-section .show-item-con .movie-card:hover {
+                transform: translateY(-3px) scale(1.02);
+                border-color: rgba(255,46,99,.35);
+            }
+            .watch-related-section .show-item-con .thumb-wrapper {
+                border-radius: 10px 10px 0 0;
+                aspect-ratio: 3/4;
+                overflow: hidden;
+            }
+            .watch-related-section .show-item-con .thumb-wrapper img {
+                width: 100%; height: 100%;
+                object-fit: cover;
+                transition: transform .35s;
+            }
+            .watch-related-section .show-item-con .movie-card:hover .thumb-wrapper img {
+                transform: scale(1.06);
+            }
+            .watch-related-section .show-item-con .kp-card-info {
+                padding: 6px 8px 8px;
+            }
+            .watch-related-section .show-item-con .kp-card-title {
+                font-size: 11.5px; font-weight: 600; color: #eee;
+                white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+                margin: 0 0 2px;
+            }
+            .watch-related-section .show-item-con .kp-card-meta {
+                font-size: 10px; color: #888; margin: 0;
+                white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            }
+            .watch-related-section .show-item-con .kp-card-rating-badge {
+                top: 6px; right: 6px;
+            }
+            .watch-related-section .show-item-con .kp-card-rating-badge .kp-card-rating {
+                font-size: 10px; padding: 2px 6px;
+                background: rgba(0,0,0,.7); border-radius: 6px;
+            }
+            .watch-related-section .show-item-con .kp-card-ep-bar {
+                bottom: 0; left: 0; right: 0;
+                font-size: 9.5px; padding: 3px 6px;
+                background: linear-gradient(transparent, rgba(0,0,0,.85));
+            }
+            .watch-related-section .show-item-con .kp-card-hover-overlay {
+                opacity: 0; transition: opacity .2s;
+            }
+            .watch-related-section .show-item-con .movie-card:hover .kp-card-hover-overlay {
+                opacity: 1;
+            }
+            .watch-related-section .anime-con.show-container {
+                background: rgba(255,255,255,.02);
+                border: 1px solid rgba(255,255,255,.05);
+                border-radius: 12px;
+                padding: 14px;
+            }
+            .watch-related-section .anime-con .head-show {
+                display: none;
+            }
+
+            /* Side-by-side Related + Recommendations */
+            .watch-related-row {
+                display: flex;
+                gap: 16px;
+                margin-bottom: 28px;
+            }
+            .watch-related-row .watch-related-section {
+                flex: 1 1 0;
+                min-width: 0;
+            }
+            /* When only one section exists, it takes full width */
+            .watch-related-row .watch-related-section:only-child {
+                flex: 1 1 100%;
             }
         </style>
         <?php endif; ?>
@@ -460,6 +645,7 @@ include_once './includes/header.php';
             <?php elseif ($is_tmdb_movie): ?>
             <!-- TMDB Movie: no episode list needed -->
             <div class="kp-movie-info-card">
+                <div class="kp-movie-info-title"><i class="fas fa-film"></i> Movie Info</div>
                 <div class="kp-movie-info-row">
                     <i class="fas fa-film"></i>
                     <span>Movie</span>
@@ -631,10 +817,32 @@ include_once './includes/header.php';
             <span><?= kp_e($display_title) ?></span>
             <span class="kp-badge"><?= kp_e($provider === 'legacy' ? 'local' : $provider) ?></span>
         </div>
-        <div class="movie-description">
-            <p><?= $plot !== '' ? nl2br(kp_e($plot)) : 'No description available.' ?></p>
+        <div class="watch-desc-card">
+            <h4><i class="fas fa-book-open"></i> Synopsis</h4>
+            <div class="desc-text">
+                <p><?= $plot !== '' ? nl2br(kp_e($plot)) : 'No description available.' ?></p>
+            </div>
+            <?php if ($plot !== '' && mb_strlen($plot) > 200): ?>
+            <button class="desc-toggle">Read more</button>
+            <?php endif; ?>
+            <?php if ($is_tmdb_movie): ?>
+            <div class="watch-desc-meta">
+                <div class="meta-item"><i class="fas fa-theater-masks"></i> <span><?= kp_e($genre) ?></span></div>
+                <div class="meta-item"><i class="fas fa-clock"></i> <span><?= kp_e($runtime) ?></span></div>
+                <div class="meta-item"><i class="fas fa-language"></i> <span><?= kp_e($language) ?></span></div>
+                <div class="meta-item"><i class="fas fa-calendar-alt"></i> <span><?= kp_e($release_date) ?></span></div>
+            </div>
+            <?php elseif ($is_tmdb_tv): ?>
+            <div class="watch-desc-meta">
+                <div class="meta-item"><i class="fas fa-theater-masks"></i> <span><?= kp_e($genre) ?></span></div>
+                <div class="meta-item"><i class="fas fa-layer-group"></i> <span><?= $season_count ?> Season<?= $season_count !== 1 ? 's' : '' ?></span></div>
+                <div class="meta-item"><i class="fas fa-language"></i> <span><?= kp_e($language) ?></span></div>
+                <div class="meta-item"><i class="fas fa-calendar-alt"></i> <span><?= kp_e($release_date) ?></span></div>
+            </div>
+            <?php endif; ?>
         </div>
 
+        <?php if (!$is_tmdb_movie && !$is_tmdb_tv): ?>
         <ul class="kp-meta-grid">
             <li><i class="fas fa-star"></i><strong>Rating:</strong><span class="kp-val"><?= kp_e($rating) ?></span></li>
             <li><i class="fas fa-theater-masks"></i><strong>Genres:</strong><span class="kp-val"><?= kp_e($genre) ?></span></li>
@@ -660,6 +868,7 @@ include_once './includes/header.php';
                 </li>
             <?php endif; ?>
         </ul>
+        <?php endif; ?>
 
         <?php if (!empty($external_links)): ?>
             <div style="margin-top:16px;">
@@ -675,13 +884,27 @@ include_once './includes/header.php';
         <?php endif; ?>
     </div>
 
+    <div class="watch-related-row">
     <?php if (!empty($relations)): ?>
-        <?= render_card_row('Related Anime', 'fa-solid fa-diagram-project', array_slice($relations, 0, 12), ['show_ep_badge' => false]) ?>
+        <div class="watch-related-section">
+            <div class="watch-section-head">
+                <div class="kp-head-bar"></div>
+                <h3>Related Anime</h3>
+            </div>
+            <?= render_card_row(null, null, array_slice($relations, 0, 12), ['show_ep_badge' => false]) ?>
+        </div>
     <?php endif; ?>
 
     <?php if (!empty($recommendations)): ?>
-        <?= render_card_row('You Might Also Like', 'fa-solid fa-thumbs-up', array_slice($recommendations, 0, 12), ['show_ep_badge' => false]) ?>
+        <div class="watch-related-section">
+            <div class="watch-section-head">
+                <div class="kp-head-bar"></div>
+                <h3>You Might Also Like</h3>
+            </div>
+            <?= render_card_row(null, null, array_slice($recommendations, 0, 12), ['show_ep_badge' => false]) ?>
+        </div>
     <?php endif; ?>
+    </div>
 </div>
 
 <?php if ($is_api): ?>
@@ -2077,7 +2300,14 @@ include_once './includes/header.php';
 
             // Resolve in the background so the gate can show the real source and
             // a resume offer, but do not start playback until the user asks.
-            resolve(currentEp, { autoplay: false });
+            resolve(currentEp, { autoplay: false }).then(function() {
+                // Remove page loader
+                var pageLoader = document.getElementById('kp-page-loader');
+                if (pageLoader) { pageLoader.style.display = 'none'; }
+            }).catch(function() {
+                var pageLoader = document.getElementById('kp-page-loader');
+                if (pageLoader) { pageLoader.style.display = 'none'; }
+            });
         });
     })();
 </script>
@@ -2285,7 +2515,19 @@ include_once './includes/header.php';
             });
         });
     })();
+
+    // ─── Description toggle ──────────────────────────────────────
+    document.querySelectorAll('.desc-toggle').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var text = btn.previousElementSibling;
+            if (text) {
+                text.classList.toggle('expanded');
+                btn.textContent = text.classList.contains('expanded') ? 'Show less' : 'Read more';
+            }
+        });
+    });
 </script>
+<?php endif; ?>
 
 <?php if (!$is_api): ?>
 <script>
@@ -2435,4 +2677,3 @@ include_once './includes/header.php';
 <?php endif; ?>
 
 <?php include_once './includes/footer.php'; ?>
-<?php endif; ?>

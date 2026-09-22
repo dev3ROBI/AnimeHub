@@ -136,16 +136,44 @@
 @media screen and (max-width: 768px) {
   .watch-wrapper {
     flex-direction: column;
+    padding: 6px;
+    gap: 12px;
   }
 
   .video-box,
   .sidebar {
     width: 100%;
     max-height: none;
+    flex: 1 1 100%;
+  }
+
+  .video-box {
+    border-radius: 10px;
   }
 
   .sidebar {
     height: auto;
+    border-radius: 10px;
+    padding: 12px;
+  }
+
+  .sidebar .movie-title {
+    font-size: 17px;
+  }
+
+  /* Episode scroll limit */
+  .episode-scroll {
+    max-height: 400px;
+  }
+
+  /* TMDB seasons wrap */
+  .tmdb-seasons-wrap h4 {
+    font-size: 14px;
+  }
+
+  /* Related sections stack on tablet */
+  .watch-related-row {
+    flex-direction: column;
   }
 }
 
@@ -700,69 +728,89 @@
 /* --- Meta as a chip grid instead of a long list --- */
 .kp-meta-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
   list-style: none;
   padding: 0;
-  margin: 0;
+  margin: 0 0 16px;
 }
 
 .kp-meta-grid li {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   min-width: 0;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border-radius: 8px;
-  background: #333;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  font-size: 13.5px;
-  color: #e6e6e6;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.06);
+  font-size: 12.5px;
+  color: #ccc;
+  transition: background .2s, border-color .2s;
+}
+
+.kp-meta-grid li:hover {
+  background: rgba(255,46,99,.06);
+  border-color: rgba(255,46,99,.2);
 }
 
 .kp-meta-grid li i {
   color: #ff2e63;
-  width: 17px;
+  width: 14px;
+  font-size: 11px;
   text-align: center;
   flex: 0 0 auto;
 }
 
 .kp-meta-grid li strong {
-  color: #fff;
-  font-weight: 600;
+  color: #aaa;
+  font-weight: 500;
   flex: 0 0 auto;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .3px;
 }
 
 .kp-meta-grid li .kp-val {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #d9d9d9;
+  color: #eee;
+  font-weight: 500;
+}
+
+.kp-meta-grid li a.kp-val {
+  color: #ff2e63;
+  text-decoration: none;
+  font-weight: 600;
+}
+.kp-meta-grid li a.kp-val:hover {
+  text-decoration: underline;
 }
 
 /* --- External link pills --- */
 .kp-links {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   margin-top: 8px;
 }
 
 .kp-links a {
-  padding: 6px 12px;
+  padding: 5px 10px;
   border-radius: 20px;
-  background: #1f1f1f;
-  border: 1px solid #333;
-  color: #ddd;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.08);
+  color: #ccc;
+  font-size: 11px;
+  font-weight: 500;
   text-decoration: none;
-  font-size: 0.85em;
-  transition: all 0.2s ease;
+  transition: all .2s;
 }
-
 .kp-links a:hover {
-  background: #ff2e63;
-  border-color: #ff2e63;
-  color: #fff;
+  background: rgba(255,46,99,.12);
+  border-color: rgba(255,46,99,.3);
+  color: #ff2e63;
 }
 
 /* --- Banner --- */
@@ -1162,6 +1210,122 @@
   .kp-gate-title { font-size: 12.5px; }
   .kp-gate-play { padding: 9px 16px; font-size: 13px; }
   .kp-ep-resume { font-size: 10px; padding: 1px 6px; }
+
+  /* Sidebar full-width responsive */
+  .sidebar {
+    padding: 10px;
+    border-radius: 10px;
+  }
+  .sidebar .movie-title {
+    font-size: 16px;
+    gap: 8px;
+  }
+  .sidebar h4 {
+    font-size: 14px;
+    margin-top: 10px;
+    margin-bottom: 6px;
+  }
+
+  /* Episode filter input */
+  #ep-search {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 13px;
+    margin-bottom: 8px;
+    box-sizing: border-box;
+  }
+
+  /* Episode list */
+  .episode-scroll {
+    max-height: 350px;
+    overflow-y: auto;
+    margin-top: 8px;
+  }
+  .episodes {
+    gap: 6px;
+  }
+  .episode {
+    padding: 10px 12px;
+    font-size: 13px;
+    border-radius: 8px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* Season tabs horizontal scroll */
+  .seasons {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 6px;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+  .seasons::-webkit-scrollbar { display: none; }
+  .season {
+    flex-shrink: 0;
+    padding: 6px 14px;
+    font-size: 12px;
+  }
+
+  /* TMDB season tabs */
+  .tmdb-season-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 6px;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+  .tmdb-season-tabs::-webkit-scrollbar { display: none; }
+  .tmdb-season-tab {
+    flex-shrink: 0;
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  /* TMDB episode list */
+  .kp-ep {
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+
+  /* Movie info card */
+  .kp-movie-info-card {
+    padding: 12px;
+  }
+  .kp-movie-info-row {
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+
+  /* Notes section */
+  .kp-notes {
+    padding: 10px;
+  }
+  .kp-note-form input {
+    font-size: 12px;
+    padding: 8px 10px;
+  }
+
+  /* Related sections */
+  .watch-related-row {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .watch-related-section .show-item-con {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 10px 8px;
+  }
+
+  /* Meta grid */
+  .kp-meta-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 6px;
+  }
+  .kp-meta-grid li {
+    padding: 6px 8px;
+    font-size: 11px;
+  }
 }
 
 /* --- Auto-play next episode overlay --- */
