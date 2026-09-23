@@ -29,15 +29,30 @@
     ?>
     <link rel="stylesheet" href="./assets/css/nav_style.css?v=<?= $kpCssVersion('nav_style.css') ?>" />
     <link rel="stylesheet" href="./assets/css/home.css?v=<?= $kpCssVersion('home.css') ?>" />
+    <?php
+    /* Page-specific CSS/JS — skip heavy sheets on pages that don't need them,
+       especially on low-end mobile where every KB matters. */
+    $kp_is_auth = strpos($_SERVER['SCRIPT_NAME'] ?? '', 'authentication') !== false;
+    $kp_is_watch = strpos($_SERVER['SCRIPT_NAME'] ?? '', 'watch.php') !== false ||
+                   strpos($_SERVER['SCRIPT_NAME'] ?? '', 'tv.php') !== false;
+    ?>
+    <?php if ($kp_is_auth): ?>
     <link rel="stylesheet" href="./assets/css/authentication.css?v=<?= $kpCssVersion('authentication.css') ?>" />
+    <?php endif; ?>
+    <?php if ($kp_is_auth || strpos($_SERVER['SCRIPT_NAME'] ?? '', 'profile') !== false): ?>
     <link rel="stylesheet" href="./assets/css/profile.css?v=<?= $kpCssVersion('profile.css') ?>" />
+    <?php endif; ?>
+    <?php if ($kp_is_watch): ?>
     <link rel="stylesheet" href="./assets/css/watch_page_style.css?v=<?= $kpCssVersion('watch_page_style.css') ?>" />
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <!-- ArtPlayer Core CSS and JS -->
+    <!-- ArtPlayer Core CSS and JS — only on watch pages -->
     <link rel="stylesheet" href="https://unpkg.com/artplayer/dist/artplayer.css">
-    <script src="https://unpkg.com/artplayer/dist/artplayer.js"></script>
+    <script src="https://unpkg.com/artplayer/dist/artplayer.js" defer></script>
     <!-- Ambilight Plugin -->
-    <script src="https://unpkg.com/artplayer-plugin-ambilight/dist/artplayer-plugin-ambilight.js"></script>
+    <script src="https://unpkg.com/artplayer-plugin-ambilight/dist/artplayer-plugin-ambilight.js" defer></script>
+    <!-- jQuery — only on watch pages where ArtPlayer needs it -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js" defer></script>
+    <?php endif; ?>
+
     <!-- Shared UI behaviour -->
     <?php
     // Same mtime trick for the local scripts.
@@ -51,6 +66,8 @@
     <script src="./assets/js/home-sections.js?v=<?= $kpJsVersion('home-sections.js') ?>" defer></script>
     <script src="./assets/js/genre-scroll.js?v=<?= $kpJsVersion('genre-scroll.js') ?>" defer></script>
 </head>
+
+
 
 <?php
 $kp_body_class = '';

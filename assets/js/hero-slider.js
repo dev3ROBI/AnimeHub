@@ -151,6 +151,9 @@
         const bg = el('img', 'kp-hero-bg');
         bg.alt = '';
         bg.decoding = 'async';
+        // Lazy-load non-active slides' background images — only the visible
+        // slide gets fetched immediately, the rest wait until built.
+        bg.loading = 'lazy';
         bg.src = data.b || data.p || '';
 
         const shade = el('div', 'kp-hero-shade');
@@ -325,20 +328,25 @@
         start();
     });
 
-    // Prefetch the next slide's images once the page has settled.
-    const warm = () => {
-        const upcoming = slides[(index + 1) % slides.length];
-        if (upcoming) buildSlide(upcoming);
-    };
-    if ('requestIdleCallback' in window) {
-        requestIdleCallback(warm, { timeout: 3000 });
-    } else {
-        setTimeout(warm, 2500);
-    }
-
     slides.forEach((s, i) => { if (i !== 0) s.setAttribute('tabindex', '-1'); });
 
     // A single banner still gets its logo; it just has nothing to rotate.
     loadLogos();
-    start();
+
+    // On coarse-pointer (touch) devices, skip auto-rotation and idle-callback
+    // warmup to save CPU/battery on low-end mobile.
+    if (!window.matchMedia('(pointer: coarse)').matches) {
+        start();
+
+        // Prefetch the next slide's images once the page has settled.
+        const warm = () => {
+            const upcoming = slides[(index + 1) % slides.length];
+            if (upcoming) buildSlide(upcoming);
+        };
+        if ('requestIdleCallback' in window) {
+            requestIdleCallback(warm, { timeout: 3000 });
+        } else {
+            setTimeout(warm, 2500);
+        }
+    }
 })();

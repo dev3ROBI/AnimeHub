@@ -9,6 +9,28 @@
   transition: 0.3s ease;
 }
 
+/* Content-visibility: skip rendering of off-screen home sections until they
+   scroll into view — major speed-up on low-end mobile. */
+.show-container,
+.notice-box-container {
+  content-visibility: auto;
+  contain-intrinsic-size: 320px;
+}
+
+/* Lazy-load hero background images */
+.kp-hero-bg {
+  content-visibility: auto;
+}
+
+/* Sidebar sections: defer rendering off-screen on mobile */
+.kp-sidebar-section {
+  content-visibility: auto;
+  contain-intrinsic-size: 240px;
+}
+
+
+
+
 .home-index-con .notice-box-container {
   display: flex;
   background: #292929;

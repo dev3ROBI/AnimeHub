@@ -14,10 +14,22 @@
     'use strict';
 
     // ─── Sidebar trending tabs ──────────────────────────────────────
+    // On low-end mobile (coarse pointer), keep only the server-rendered DAY
+    // list and make the WEEK/MONTH tabs inert — saves a network + decode cost.
     const tabs = Array.from(document.querySelectorAll('.kp-trend-tab'));
     const trendList = document.getElementById('kpTrendList');
+    const isCoarse = window.matchMedia('(pointer: coarse)').matches;
 
     if (tabs.length && trendList) {
+        if (isCoarse) {
+            tabs.forEach((tab) => {
+                tab.disabled = true;
+                tab.style.opacity = '0.5';
+                tab.style.cursor = 'default';
+            });
+            return;
+        }
+
         const endpoint = './includes/trending_period.php';
         const cache = new Map();
 
