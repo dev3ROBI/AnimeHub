@@ -1,76 +1,335 @@
 /*
- * Install banner — styles for the DOM built by install-prompt.js
- * (.kp-install-banner + .kp-install-text / .kp-install-actions). Loaded on
+ * Install banner + confirmation modal — styles for the DOM built by
+ * install-prompt.js: the banner (.kp-install-banner + .kp-install-icon /
+ * .kp-install-text / .kp-install-actions / .kp-install-close) and the
+ * confirmation dialog (.kp-install-overlay / .kp-install-modal). Loaded on
  * demand by that script, so pages that never see a prompt pay 0 bytes.
  */
 .kp-install-banner {
   position: fixed;
-  left: 16px;
-  right: 16px;
-  bottom: 16px;
+  left: 12px;
+  right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   z-index: 10000;
   display: flex;
   align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
-  background: #292929;
+  gap: 12px;
+  background: linear-gradient(160deg, #1c1c27 0%, #14141c 72%);
   color: #fff;
-  border: 1px solid rgba(255, 46, 99, 0.45);
-  border-radius: 14px;
-  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 16px;
+  padding: 13px 40px 13px 14px; /* room for the close button */
   font-family: 'Poppins', sans-serif;
   font-size: 14px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-  animation: kpInstallIn 0.35s ease;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+  animation: kpInstallIn 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* gradient hairline across the top edge */
+.kp-install-banner::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #7c3aed, #ec4899, #ff2e63);
 }
 @keyframes kpInstallIn {
-  from { transform: translateY(24px); opacity: 0; }
-  to   { transform: translateY(0);    opacity: 1; }
+  from { transform: translateY(28px) scale(0.98); opacity: 0; }
+  to   { transform: translateY(0)    scale(1);    opacity: 1; }
+}
+.kp-install-icon {
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.25), rgba(236, 72, 153, 0.25));
+  border: 1px solid rgba(236, 72, 153, 0.35);
+  color: #f9a8d4;
 }
 .kp-install-text {
-  flex: 1 1 180px;
+  flex: 1 1 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-.kp-install-text strong { font-weight: 600; font-size: 14px; }
-.kp-install-text span   { color: #b9b9b9; font-size: 12.5px; line-height: 1.4; }
-.kp-install-actions { display: flex; align-items: center; gap: 8px; }
+.kp-install-text strong {
+  font-weight: 600;
+  font-size: 13.5px;
+  letter-spacing: 0.2px;
+}
+.kp-install-text span {
+  color: #9aa0a6;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.kp-install-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
 .kp-install-btn {
   border: none;
   cursor: pointer;
   font-family: inherit;
   font-weight: 600;
-  font-size: 13px;
+  font-size: 12.5px;
   padding: 9px 16px;
   border-radius: 999px;
-  transition: transform 0.15s ease, background 0.15s ease;
+  white-space: nowrap;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
-.kp-install-yes { background: #ff2e63; color: #fff; }
-.kp-install-yes:hover { background: #ff4d7a; transform: translateY(-1px); }
+.kp-install-yes {
+  background: linear-gradient(135deg, #7c3aed, #ec4899);
+  color: #fff;
+  box-shadow: 0 6px 18px rgba(124, 58, 237, 0.4);
+}
+.kp-install-yes:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px rgba(236, 72, 153, 0.45);
+}
+.kp-install-yes:active { transform: translateY(0); }
 .kp-install-no {
   background: transparent;
-  color: #b9b9b9;
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: #9aa0a6;
+  border: 1px solid rgba(255, 255, 255, 0.18);
 }
-.kp-install-no:hover { color: #fff; border-color: rgba(255, 255, 255, 0.45); }
+.kp-install-no:hover { color: #fff; border-color: rgba(255, 255, 255, 0.4); }
 .kp-install-close {
   position: absolute;
-  top: 6px;
-  right: 10px;
-  background: none;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.06);
   border: none;
-  color: #888;
-  font-size: 18px;
+  border-radius: 8px;
+  color: #8b8f95;
+  font-size: 16px;
   line-height: 1;
   cursor: pointer;
-  padding: 4px;
+  transition: background 0.15s ease, color 0.15s ease;
 }
-.kp-install-close:hover { color: #fff; }
+.kp-install-close:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+/* the modal reuses .kp-install-close, just a touch larger */
+.kp-install-modal-close {
+  top: 10px;
+  right: 10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  font-size: 18px;
+}
+
+/* ============================================================================
+   Confirmation modal (footer "Install App" + banner Install both open it).
+   ========================================================================== */
+body.kp-install-noscroll { overflow: hidden; }
+
+.kp-install-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(6, 6, 10, 0.72);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.22s ease, visibility 0.22s ease;
+  font-family: 'Poppins', sans-serif;
+  overflow-y: auto;
+}
+
+.kp-install-overlay.is-open {
+  opacity: 1;
+  visibility: visible;
+}
+
+.kp-install-modal {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  margin: auto;
+  padding: 26px 24px 22px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: linear-gradient(160deg, #1c1c27 0%, #14141c 72%);
+  color: #fff;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.65);
+  text-align: center;
+  transform: translateY(14px) scale(0.97);
+  transition: transform 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.kp-install-overlay.is-open .kp-install-modal {
+  transform: translateY(0) scale(1);
+}
+
+/* gradient hairline across the top edge, same trick as the banner */
+.kp-install-modal::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #7c3aed, #ec4899, #ff2e63);
+}
+
+.kp-install-modal-badge {
+  width: 58px;
+  height: 58px;
+  margin: 4px auto 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 18px;
+  border: 1px solid rgba(236, 72, 153, 0.34);
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.32), rgba(236, 72, 153, 0.3));
+  color: #f9a8d4;
+  box-shadow: 0 12px 30px rgba(124, 58, 237, 0.28);
+}
+
+.kp-install-modal-badge.is-info {
+  font-size: 22px;
+  color: #c4b5fd;
+}
+
+.kp-install-modal h3 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.kp-install-modal-sub {
+  margin: 0 0 18px;
+  color: #9aa0a6;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.kp-install-perks {
+  list-style: none;
+  margin: 0 0 20px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+}
+
+.kp-install-perks li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: #c6c9ce;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.kp-install-perks li i {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(124, 58, 237, 0.18);
+  border: 1px solid rgba(124, 58, 237, 0.34);
+  color: #c4b5fd;
+  font-size: 9px;
+}
+
+.kp-install-perks li span { flex: 1 1 auto; }
+
+.kp-install-steps {
+  counter-reset: kpstep;
+  list-style: none;
+  margin: 0 0 20px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  text-align: left;
+}
+
+.kp-install-steps li {
+  counter-increment: kpstep;
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  color: #c6c9ce;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.kp-install-steps li::before {
+  content: counter(kpstep);
+  flex: 0 0 auto;
+  width: 21px;
+  height: 21px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #7c3aed, #ec4899);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.kp-install-steps li span { flex: 1 1 auto; }
+
+.kp-install-modal-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.kp-install-modal-actions .kp-install-btn {
+  flex: 1 1 0;
+  padding: 12px 18px;
+  font-size: 13px;
+}
+
+@media (max-width: 420px) {
+  .kp-install-overlay { padding: 14px; }
+  .kp-install-modal { padding: 22px 18px 18px; border-radius: 18px; }
+  .kp-install-modal h3 { font-size: 17px; }
+  .kp-install-modal-actions { flex-direction: column-reverse; }
+}
+
 @media (min-width: 768px) {
-  .kp-install-banner { left: auto; right: 24px; bottom: 24px; max-width: 380px; }
+  .kp-install-banner {
+    left: auto;
+    right: 20px;
+    bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    max-width: 400px;
+  }
+}
+@media (max-width: 480px) {
+  .kp-install-banner { flex-wrap: wrap; }
+  .kp-install-actions { width: 100%; }
+  .kp-install-btn { flex: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
   .kp-install-banner { animation: none; }
+  .kp-install-modal { transition: none; }
 }

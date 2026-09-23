@@ -8,12 +8,17 @@
  *
  * Strategies:
  *   navigations  → network-first, cache updated on success, offline.html fallback
- *   static       → cache-first with ignoreSearch (asset URLs carry ?v=mtime);
- *                  VERSION bump on deploy purges both caches
+ *   static       → cache-first keyed by the FULL url: asset URLs carry
+ *                  ?v=<mtime>-<size>, so editing a file changes the URL and a
+ *                  new URL is always a miss (that is what stops a pre-edit
+ *                  sheet from being served under the new one). The
+ *                  ignoreSearch match is consulted only when the network is
+ *                  gone, so offline still renders. VERSION bump purges both
+ *                  caches on deploy.
  *   APIs (.php)  → network-first, exact-URL cache fallback when offline
  *   media/video  → not intercepted at all (no range/HLS corruption)
  */
-const VERSION = 'v2'; // v2: +countdown.js, aired-episode semantics fix
+const VERSION = 'v5'; // v5: exact-URL asset caching (no stale CSS/JS under a new ?v=)
 const SHELL_CACHE = 'kp-shell-' + VERSION;
 const RUNTIME_CACHE = 'kp-runtime-' + VERSION;
 const OFFLINE_URL = './assets/pwa/offline.html';
@@ -33,6 +38,8 @@ const PRECACHE_URLS = [
   './assets/js/home-sections.min.js',
   './assets/js/genre-scroll.min.js',
   './assets/js/countdown.min.js',
+  './assets/pwa/install-prompt.min.js',
+  './assets/pwa/install-prompt.css',
   './assets/fonts/poppins-400.woff2',
   './assets/fonts/poppins-600.woff2',
   './assets/fonts/firacode-400.woff2',
@@ -120,24 +127,33 @@ self.addEventListener('fetch', (event) => {
           }
           return res;
         })
-        .catch(() => caches.match(request))
+        .catch(() => caches.match(request).then((hit) => hit || Response.error()))
     );
     return;
   }
 
-  // Static + artwork: cache-first (?v= ignored so mtime bumps still hit the
-  // same entry — the VERSION purge above is what rotates content).
+  // Static + artwork: cache-first, keyed by the exact URL. Matching with
+  // ignoreSearch used to hand back the previous file for every new ?v= URL,
+  // which is how a rebuilt stylesheet kept arriving as the pre-edit one. A
+  // changed file has a changed URL, so it misses and is fetched; the loose
+  // match is only used as an offline fallback (any version beats nothing).
   if (isCacheableAsset(url)) {
     event.respondWith(
-      caches.match(request, { ignoreSearch: true }).then((cached) => {
+      caches.match(request).then((cached) => {
         if (cached) return cached;
-        return fetch(request).then((res) => {
-          if (res && (res.ok || res.type === 'opaque')) {
-            const clone = res.clone();
-            caches.open(RUNTIME_CACHE).then((c) => c.put(request, clone));
-          }
-          return res;
-        });
+        return fetch(request)
+          .then((res) => {
+            if (res && (res.ok || res.type === 'opaque')) {
+              const clone = res.clone();
+              caches.open(RUNTIME_CACHE).then((c) => c.put(request, clone));
+            }
+            return res;
+          })
+          .catch(() =>
+            caches
+              .match(request, { ignoreSearch: true })
+              .then((hit) => hit || Response.error())
+          );
       })
     );
   }

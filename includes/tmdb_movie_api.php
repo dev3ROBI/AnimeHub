@@ -528,8 +528,10 @@ function tmdb_tv_detail($id) {
     if ($id <= 0) return null;
 
     // v3: the cached payload gained last_episode_to_air (the notification check
-    // reads it), so older entries have to be refetched once.
-    $key = api_cache_key('tmdb_tv', ['detail:v3', $id]);
+    // reads it). v4: the placeholder episode titles became '' — the S/E label is
+    // built by the UI, and a placeholder title printed as a junk "· S1 E1"
+    // suffix once the real season data started overriding it.
+    $key = api_cache_key('tmdb_tv', ['detail:v4', $id]);
     $hit = api_cache_get($key);
     if (is_array($hit)) return $hit;
 
@@ -552,9 +554,9 @@ function tmdb_tv_detail($id) {
             $episodesList[] = [
                 'number' => $e,
                 'season' => $sNum,
-                'title'  => 'S' . $sNum . ' E' . $e,
+                'title'  => '',   // placeholder: the real name comes from tmdb_tv_season()
                 'image'  => !empty($s['poster_path']) ? TMDB_IMAGE_BASE . $s['poster_path'] : $item['poster'],
-                'aired'  => '',
+                'aired'  => '',   // placeholder: no air date known from the season summary
             ];
         }
     }
@@ -606,29 +608,81 @@ function tmdb_tv_detail($id) {
     return $item;
 }
 
+/**
+ * One season with real episode data: name, still, air date, runtime.
+ *
+ * /tv/{id}/season/{n} is the only endpoint that carries those, so the watch
+ * page's episode list (and its season switcher) reads it instead of the bare
+ * per-season summary used for the tab counts. Rows keep the `episodes_list`
+ * shape and arrive lock-tagged by tmdb_tv_lock_state().
+ *
+ * Returns null only when TMDB has nothing for the season.
+ */
 function tmdb_tv_season($tvId, $season) {
     $tvId = (int)$tvId;
     $season = (int)$season;
     if ($tvId <= 0 || $season <= 0) return null;
 
-    $key = api_cache_key('tmdb_tv', ['season', $tvId, $season]);
+    // v2: rows gained runtime/overview, so older cached entries are refetched.
+    $key = api_cache_key('tmdb_tv', ['season:v2', $tvId, $season]);
     $hit = api_cache_get($key);
-    if (is_array($hit)) return $hit;
 
-    $data = tmdb_get('/tv/' . $tvId . '/season/' . $season);
-    if (!$data || empty($data['episodes'])) return null;
+    if (!is_array($hit)) {
+        $data = tmdb_get('/tv/' . $tvId . '/season/' . $season);
+        if (!$data || empty($data['episodes'])) return null;
 
-    $episodes = [];
-    foreach ($data['episodes'] as $ep) {
-        $episodes[] = [
-            'number' => (int)($ep['episode_number'] ?? 0),
-            'season' => $season,
-            'title'  => $ep['name'] ?? '',
-            'image'  => !empty($ep['still_path']) ? TMDB_IMAGE_BASE . $ep['still_path'] : '',
-            'aired'  => $ep['air_date'] ?? '',
-        ];
+        $hit = [];
+        foreach ($data['episodes'] as $ep) {
+            $num = (int)($ep['episode_number'] ?? 0);
+            if ($num <= 0) continue;
+            $hit[] = [
+                'number'   => $num,
+                'season'   => (int)($ep['season_number'] ?? $season),
+                'title'    => (string)($ep['name'] ?? ''),
+                'image'    => !empty($ep['still_path']) ? TMDB_IMAGE_BASE . $ep['still_path'] : '',
+                'aired'    => (string)($ep['air_date'] ?? ''),
+                'runtime'  => isset($ep['runtime']) && $ep['runtime'] ? (int)$ep['runtime'] : 0,
+                'overview' => (string)($ep['overview'] ?? ''),
+            ];
+        }
+
+        api_cache_set($key, 'tmdb_tv', $hit, CACHE_TTL_TMDB_INFO);
     }
 
-    api_cache_set($key, 'tmdb_tv', $episodes, CACHE_TTL_TMDB_INFO);
-    return $episodes;
+    // Lock state is applied AFTER the cache read, so an episode that aired while
+    // the entry was cached still unlocks on its own date instead of waiting for
+    // the TTL to expire.
+    return tmdb_tv_lock_state($hit);
+}
+
+/**
+ * Tag episodes that have not aired yet.
+ *
+ * TMDB only knows the broadcast DAY, so an episode counts as aired from local
+ * midnight of that date — locking a same-day episode would hide something the
+ * viewer can already watch. Locked rows get `lk`, `a` (unix ts) and `ad`
+ * (date-level, no air time known), which is what the arrival text and the
+ * `.kp-cd` countdown chip read. Mirrors the AniList lock fields so watch.php and
+ * the client can treat both providers identically.
+ */
+function tmdb_tv_lock_state(array $rows) {
+    $today = strtotime('today');
+    if ($today === false) $today = time();
+
+    foreach ($rows as &$row) {
+        unset($row['lk'], $row['a'], $row['ax'], $row['ad']);
+
+        $air = trim((string)($row['aired'] ?? ''));
+        if ($air === '') continue;
+
+        $ts = strtotime($air . ' 00:00:00');
+        if ($ts === false || $ts <= $today) continue;
+
+        $row['lk'] = 1;
+        $row['a']  = $ts;
+        $row['ad'] = 1;
+    }
+    unset($row);
+
+    return $rows;
 }

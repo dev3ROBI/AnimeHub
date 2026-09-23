@@ -14,6 +14,18 @@
 /* --- Base (nav_style.css) --- */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/*
+ * kp_img_attrs() emits width/height attributes so the browser can reserve a
+ * box before the artwork arrives (less CLS). Those attributes are
+ * presentational hints, and a hint beats `aspect-ratio`: every rule shaped
+ * like `.x img { width: 100%; aspect-ratio: 2 / 3 }` was silently rendered at
+ * the attribute height instead — a watchlist poster measured 159×690 rather
+ * than 159×239 (a hopelessly zoomed crop). Height has to stay `auto` so the
+ * ratio (or the intrinsic size) drives it; a rule that genuinely wants a
+ * fixed height still wins, because it arrives in a later stylesheet.
+ */
+img[width][height] { height: auto; }
+
 :root { color-scheme: dark; }
 
 body {

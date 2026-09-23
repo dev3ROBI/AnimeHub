@@ -80,6 +80,14 @@ if ($is_api) {
         $season_id = max(1, intval($_GET['season'] ?? 1));
         $anime_data = tmdb_tv_detail($tmdb_tv_id);
         if ($anime_data) {
+            // A bare link (home card, search, share) carries no ?season= — open
+            // the season of the most recent episode instead of always landing on
+            // season 1, which is where the AniList sidebar opens too. Deep links
+            // (continue watching, notifications) always pass ?season= and win.
+            if (!isset($_GET['season']) && !empty($anime_data['last_episode_to_air']['season_number'])) {
+                $season_id = max(1, (int)$anime_data['last_episode_to_air']['season_number']);
+            }
+
             $episodes_list = $anime_data['episodes_list'] ?? [];
             // Set embed URL server-side for direct fallback
             if (function_exists('tv_embed_resolve')) {
@@ -311,6 +319,38 @@ if ($is_api && $anime_data) {
         $episodes_total = max($episodes_total, count($episodes_list));
     }
 
+    // ─── TMDB TV: real rows for the season being watched ──────────────────
+    // tmdb_tv_detail() only carries the per-season summary (name-less S/E
+    // placeholders with no air dates) — enough for the tab counts, not for the
+    // list. The visible season is upgraded here with real episode names, stills
+    // and air dates (already lock-tagged by tmdb_tv_lock_state()); clicking
+    // another tab fetches that season on demand via includes/get_tv_season.php.
+    $kp_season_total = 0;
+    $kp_season_aired = 0;
+    if ($is_tmdb_tv && !empty($tmdb_tv_id) && $season_id > 0 && function_exists('tmdb_tv_season')) {
+        $kp_real_rows = tmdb_tv_season((int)$tmdb_tv_id, (int)$season_id);
+        if ($kp_real_rows) {
+            $episodes_list = array_merge(
+                array_values(array_filter(
+                    $episodes_list,
+                    fn($e) => (int)($e['season'] ?? 1) !== (int)$season_id
+                )),
+                $kp_real_rows
+            );
+            $episodes_total = max($episodes_total, count($episodes_list));
+        }
+
+        foreach ($episodes_list as $kp_row) {
+            if ((int)($kp_row['season'] ?? 1) !== (int)$season_id) continue;
+            $kp_season_total++;
+            if (empty($kp_row['lk'])) $kp_season_aired++;
+        }
+    }
+
+    // Episode-count heading: TMDB TV counts the current season (like the AniList
+    // sidebar does), everything else counts the list it renders.
+    $kp_head_total = $is_tmdb_tv ? $kp_season_total : $episodes_total;
+
     // Lock unreleased episodes — full planned count is listed, but not all aired.
     // Firing condition: some rows out, not all out. aired==0 (pre-premiere /
     // NOT_YET_RELEASED) must lock too; the old `aired > 0` silently skipped it.
@@ -340,7 +380,10 @@ if ($is_api && $anime_data) {
         }
     }
 
-    $kp_can_lock = !$is_tmdb_movie && !empty($episodes_list) && $episodes_total > 0
+    // TMDB TV is excluded on purpose: its rows are already lock-tagged from the
+    // real air dates (tmdb_tv_lock_state) and its season numbering restarts at 1,
+    // which this series-wide `aired_episodes` comparison would mis-lock.
+    $kp_can_lock = !$is_tmdb_movie && !$is_tmdb_tv && !empty($episodes_list) && $episodes_total > 0
         && $kp_aired_eps < $episodes_total
         && ($kp_aired_eps > 0 || !empty($next_airing) || $kp_is_airing);
     if ($kp_can_lock) {
@@ -591,12 +634,6 @@ include_once './includes/header.php';
 
             .tmdb-seasons-wrap { margin-bottom: 8px; }
             .tmdb-seasons-wrap h4 { margin-bottom: 6px; }
-            /* "18 episodes in total" — the heading itself only counts seasons. */
-            .kp-seasons-note {
-                margin: 0 0 8px;
-                color: #8b8f95;
-                font-size: 11.5px;
-            }
             .tmdb-season-tabs {
                 display: flex;
                 gap: 8px;
@@ -888,14 +925,14 @@ include_once './includes/header.php';
 
             <?php if ($is_tmdb_tv): ?>
             <div class="tmdb-seasons-wrap" id="tmdb-seasons-wrap">
-                <?php /* Count of seasons here — $episodes_total is the episode count
+                <?php /* Season count here — $episodes_total is the episode count
                          across the whole series and used to print as "Seasons (18)". */ ?>
                 <h4>Seasons<?= $season_count ? ' (' . (int)$season_count . ')' : '' ?></h4>
-                <?php if ($episodes_total > 0): ?>
-                <p class="kp-seasons-note"><?= (int)$episodes_total ?> episodes in total</p>
-                <?php endif; ?>
                 <div class="tmdb-season-tabs" id="tmdb-season-tabs"></div>
             </div>
+            <?php /* Same heading the anime sidebar shows. Season tabs and this
+                     count are kept in sync by the season switcher below. */ ?>
+            <h4 id="kp-episodes-heading">Episodes<?= $kp_head_total ? ' (' . (int)$kp_head_total . ')' : '' ?></h4>
             <?php elseif ($is_tmdb_movie): ?>
             <!-- TMDB Movie: no episode list needed -->
             <div class="kp-movie-info-card">
@@ -918,7 +955,7 @@ include_once './includes/header.php';
                 <?php endif; ?>
             </div>
             <?php else: ?>
-            <h4>Episodes<?= $episodes_total ? ' (' . (int)$episodes_total . ')' : '' ?></h4>
+            <h4 id="kp-episodes-heading">Episodes<?= $episodes_total ? ' (' . (int)$episodes_total . ')' : '' ?></h4>
             <?php endif; ?>
             <?php if (!empty($episodes_list) && !$is_tmdb_movie): ?>
                 <input type="text" id="ep-search" placeholder="Filter episode…" style="margin-bottom:6px;">
@@ -1249,7 +1286,8 @@ include_once './includes/header.php';
                     'dn'  => isset($e['dn']) ? (int)$e['dn'] : null,
                     'src' => (string)($e['src'] ?? ''),
                     'a'   => isset($e['a']) && $e['a'] ? (int)$e['a'] : null,
-                    'ax'  => !empty($e['ax']),
+                    'ax'  => !empty($e['ax']),   // exact air time (AniList)
+                    'ad'  => !empty($e['ad']),   // date-level only (TMDB)
                     'lk'  => !empty($e['lk']),
                 ], $episodes_list),
                 JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP
@@ -2427,14 +2465,17 @@ include_once './includes/header.php';
             label.className = 'kp-ep-main';
             const num = document.createElement('strong');
             if (KP.isTmdbTv) {
-                num.textContent = 'S' + (season || KP.currentSeason || 1) + ' E' + number;
+                // Same S{n}E{n} label the anime list uses (no space).
+                num.textContent = 'S' + (season || KP.currentSeason || 1) + 'E' + number;
             } else if (KP.kpSeason > 0) {
                 num.textContent = 'S' + KP.kpSeason + 'E' + dn;
             } else {
                 num.textContent = 'EP' + String(number).padStart(3, '0');
             }
             label.appendChild(num);
-            if (title && !KP.isTmdbTv) {
+            // TMDB season data carries real episode names, so the muted suffix is
+            // no longer anime-only.
+            if (title) {
                 const t = document.createElement('span');
                 t.className = 'kp-ep-title';
                 t.textContent = ' · ' + (title.length > 42 ? title.slice(0, 42) + '…' : title);
@@ -2458,14 +2499,16 @@ include_once './includes/header.php';
                 right.appendChild(lockI);
                 if (ep.a) {
                     const when = new Date(ep.a * 1000);
-                    const exact = !!ep.ax;
+                    const exact = !!ep.ax;            // AniList: real air time
+                    const dayOnly = !exact && !!ep.ad; // TMDB: broadcast day is all we get
                     const air = document.createElement('span');
-                    air.className = 'kp-ep-air' + (exact ? '' : ' kp-ep-air-est');
-                    // Exact schedule → "Oct 5 · 20:30"; weekly estimate → "≈ Oct 12".
-                    air.textContent = (exact ? '' : '\u2248 ') + when.toLocaleString(undefined, exact
+                    air.className = 'kp-ep-air' + (exact || dayOnly ? '' : ' kp-ep-air-est');
+                    // Exact schedule → "Oct 5 · 20:30"; TMDB day → "Oct 5";
+                    // weekly estimate → "≈ Oct 12".
+                    air.textContent = (exact || dayOnly ? '' : '\u2248 ') + when.toLocaleString(undefined, exact
                         ? { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }
                         : { month: 'short', day: 'numeric' });
-                    air.title = (exact ? 'Airs ' : 'Estimated ~ ') + when.toLocaleString();
+                    air.title = (exact || dayOnly ? 'Airs ' : 'Estimated ~ ') + when.toLocaleString();
                     right.appendChild(air);
 
                     const cd = document.createElement('span');
@@ -2485,9 +2528,15 @@ include_once './includes/header.php';
             el.addEventListener('click', function () {
                 if (isLocked) {
                     if (typeof kpToast === 'function') {
-                        kpToast(ep.a
-                            ? 'EP ' + number + ' arrives ' + new Date(ep.a * 1000).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
-                            : 'EP ' + number + " hasn't aired yet — locked until release", 'info');
+                        if (!ep.a) {
+                            kpToast('EP ' + number + " hasn't aired yet — locked until release", 'info');
+                        } else {
+                            // Date-level rows (TMDB) would otherwise print a bogus 12:00 AM.
+                            const day = new Date(ep.a * 1000).toLocaleString(undefined, ep.ad
+                                ? { weekday: 'short', day: 'numeric', month: 'short' }
+                                : { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+                            kpToast('EP ' + number + ' arrives ' + day, 'info');
+                        }
                     }
                     return;
                 }
@@ -2617,17 +2666,65 @@ include_once './includes/header.php';
         }
 
         // ─── Season tabs for TMDB TV ──────────────────────────────
+
+        /** "Episodes (n)" heading for the season on screen. */
+        function updateEpisodesHeading() {
+            var h = document.getElementById('kp-episodes-heading');
+            if (!h) return;
+
+            var total = 0;
+            (KP.episodes || []).forEach(function (ep) {
+                if ((ep.s || 1) === KP.currentSeason) total++;
+            });
+            h.textContent = 'Episodes' + (total ? ' (' + total + ')' : '');
+        }
+
+        /** Same skeleton/state markup the server ships on first paint. */
+        function showEpisodesLoading() {
+            var container = document.getElementById('anikuro-episode-container');
+            if (!container) return;
+            container.innerHTML = '<p class="kp-ep-loading" role="status">' +
+                '<i class="fas fa-spinner fa-spin"></i> এপিসোড লোড হচ্ছে…</p>';
+        }
+
+        /**
+         * Fetch one season and swap its rows into KP.episodes.
+         *
+         * watch.php inlines the season being watched with real names + air dates;
+         * every other season is only a per-season summary there, so a tab switch
+         * asks for that season (includes/get_tv_season.php returns the same row
+         * shape, already lock-tagged). A failure keeps the summary rows.
+         */
+        function loadSeasonEpisodes(seasonNum, done) {
+            fetch('./includes/get_tv_season.php?tmdb_id=' + encodeURIComponent(KP.tmdbId) +
+                  '&season=' + encodeURIComponent(seasonNum))
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    var rows = data && data.episodes;
+                    if (!Array.isArray(rows) || !rows.length) return;
+                    KP.episodes = (KP.episodes || []).filter(function (ep) {
+                        return (ep.s || 1) !== seasonNum;
+                    }).concat(rows);
+                })
+                .catch(function () { /* offline / bad season → keep what we have */ })
+                .then(function () { done(); });
+        }
+
         function buildSeasonTabs() {
             if (!KP.isTmdbTv) return;
             const tabsEl = document.getElementById('tmdb-season-tabs');
             if (!tabsEl) return;
             tabsEl.innerHTML = '';
 
+            // Count released episodes per season: the tab shows what is actually
+            // watchable ("1179 eps") while the heading shows the season total
+            // ("Episodes (1202)"), exactly like the AniList sidebar.
             var seasons = {};
             (KP.episodes || []).forEach(function (ep) {
                 var s = ep.s || 1;
-                if (!seasons[s]) seasons[s] = 0;
-                seasons[s]++;
+                if (!seasons[s]) seasons[s] = { total: 0, aired: 0 };
+                seasons[s].total++;
+                if (!ep.lk) seasons[s].aired++;
             });
 
             var keys = Object.keys(seasons).map(Number).sort(function (a, b) { return a - b; });
@@ -2637,10 +2734,13 @@ include_once './includes/header.php';
             }
 
             keys.forEach(function (sNum) {
+                var c = seasons[sNum];
+                var shown = (c.aired > 0 && c.aired < c.total) ? c.aired : c.total;
+
                 var btn = document.createElement('button');
                 btn.className = 'tmdb-season-tab' + (sNum === KP.currentSeason ? ' active' : '');
                 btn.dataset.season = sNum;
-                btn.innerHTML = '<strong>Season ' + sNum + '</strong><span class="tmdb-season-ep-count">' + seasons[sNum] + ' eps</span>';
+                btn.innerHTML = '<strong>Season ' + sNum + '</strong><span class="tmdb-season-ep-count">' + shown + ' eps</span>';
                 btn.addEventListener('click', function () {
                     if (KP.currentSeason === sNum) return;
                     KP.currentSeason = sNum;
@@ -2661,15 +2761,21 @@ include_once './includes/header.php';
 
                     currentEp = 1;
                     payload = null;
-                    buildSeasonTabs();
-                    buildEpisodeList();
+                    showEpisodesLoading();
 
-                    // Auto-play first episode of the season
-                    var firstEp = document.querySelector('#anikuro-episode-container .episode');
-                    if (firstEp) selectEpisode(firstEp, 1);
+                    loadSeasonEpisodes(sNum, function () {
+                        buildSeasonTabs();
+                        buildEpisodeList();
+
+                        // Auto-play first episode of the season
+                        var firstEp = document.querySelector('#anikuro-episode-container .episode');
+                        if (firstEp) selectEpisode(firstEp, 1);
+                    });
                 });
                 tabsEl.appendChild(btn);
             });
+
+            updateEpisodesHeading();
         }
 
         const epSearch = document.getElementById('ep-search');

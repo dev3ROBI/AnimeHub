@@ -57,11 +57,53 @@ include_once __DIR__ . '/performance.php';
     <?php endif; ?>
 
     <?php
+    /*
+     * Async-sheet guard.
+     *
+     * The media="print" → media="all" swap is what keeps these sheets off the
+     * critical path, but the swap only happens in onload: if the request fails
+     * (flaky mobile link, SW hiccup, proxy error) the sheet stays print-only
+     * and the page renders UNSTYLED with no way back. So every lazy sheet is
+     * tagged data-kp-lazy, onload marks it ready, and anything still unmarked
+     * after load (or 3s) is forced on and re-requested once with a fresh URL.
+     * Defined before the tags so a fast onerror can retry immediately.
+     */
+    ?>
+    <script>
+        (function () {
+            function retry(link) {
+                if (!link || link.getAttribute('data-kp-ready')) return;
+                link.setAttribute('data-kp-ready', '1');   // one retry per sheet
+                link.media = 'all';                        // apply what is cached
+
+                var again = link.cloneNode(false);
+                again.removeAttribute('id');
+                again.media = 'all';
+                again.href = link.href + (link.href.indexOf('?') > -1 ? '&' : '?') + 'kp-css-retry=1';
+                document.head.appendChild(again);
+            }
+
+            window.kpCssRetry = retry;
+
+            function sweep() {
+                var lazy = document.querySelectorAll('link[data-kp-lazy]:not([data-kp-ready])');
+                for (var i = 0; i < lazy.length; i++) retry(lazy[i]);
+            }
+
+            setTimeout(sweep, 3000);
+            window.addEventListener('load', function () { setTimeout(sweep, 150); });
+        })();
+    </script>
+    <?php
     /* Stylesheet tag for a sheet that must not block the first paint. */
     $kpLazyCss = static function ($file) {
-        $url = kp_asset('css', $file);
-        echo '<link rel="stylesheet" href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '" media="print" onload="this.media=\'all\'">' . "\n";
-        echo '    <noscript><link rel="stylesheet" href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '"></noscript>' . "\n";
+        $url   = kp_asset('css', $file);
+        $urlTxt = htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
+        $id    = 'kp-css-' . preg_replace('/[^a-z0-9]+/i', '-', pathinfo($file, PATHINFO_FILENAME));
+        echo '<link rel="stylesheet" id="' . $id . '" data-kp-lazy="1" href="' . $urlTxt . '" media="print"'
+            . ' onload="this.media=\'all\';this.setAttribute(\'data-kp-ready\',\'1\')"'
+            . ' onerror="window.kpCssRetry&amp;&amp;window.kpCssRetry(this)">' . "\n";
+        echo '    <noscript><link rel="stylesheet" href="' . $urlTxt . '"></noscript>' . "\n";
     };
     ?>
     <?php $kpLazyCss('nav_style.css'); ?>

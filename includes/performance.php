@@ -131,7 +131,13 @@ if (!defined('KP_PERF_LOADED')) {
             if ($rel === '') return kp_base() . ltrim(str_replace('\\', '/', $file), '/');
 
             $path = dirname(__DIR__) . '/' . $rel;
-            $ver  = is_file($path) ? filemtime($path) : 1;
+
+            // mtime + byte size, not mtime alone: Windows (and FAT) only
+            // resolve filemtime() to the second, so two edits inside the same
+            // second produced the SAME ?v= for different bytes — the browser
+            // and the service worker then kept serving the previous file under
+            // the new URL. The size is free and changes with the content.
+            $ver = is_file($path) ? filemtime($path) . '-' . filesize($path) : '1';
 
             return kp_base() . $rel . '?v=' . $ver;
         }
