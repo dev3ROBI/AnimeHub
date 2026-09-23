@@ -6,6 +6,14 @@
 include_once __DIR__ . '/catalog.php';
 include_once __DIR__ . '/tmdb_api.php';
 
+/*
+ * The card helpers below ask performance.php for image srcset/loading
+ * attributes, and this file is also used by the JSON fragment endpoints
+ * (genre_items.php, trending_period.php) that never load header.php — so the
+ * performance layer is pulled in here rather than relying on header.php.
+ */
+include_once __DIR__ . '/performance.php';
+
 if (!function_exists('kp_e')) {
     function kp_e($value) {
         return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
@@ -77,6 +85,11 @@ function render_anime_card($item, array $opts = []) {
     $link = kp_watch_url($item, $opts['link_episode'] ?? null);
     $cardId = kp_e($item['id'] ?? '');
 
+    // Lazy + async decode, and a srcset so a phone downloads the 230px poster
+    // instead of the 460px one whenever the card is small enough.
+    $posterEsc   = kp_e($poster);
+    $posterAttrs = kp_img_attrs($poster);
+
     // Rating
     $rating = $item['score'] ?? null;
     if ($rating === null || $rating === '' || $rating === 'N/A') {
@@ -124,7 +137,7 @@ function render_anime_card($item, array $opts = []) {
     } elseif ($currentEp > 0 || $totalEps > 0) {
         $epBar = '<div class="kp-card-ep-bar">'
             . '<span><i class="fas fa-closed-captioning"></i> ' . ($currentEp ?: '?') . '</span>'
-            . '<span><i class="fas fa-microphone"></i> ' . ($item['has_dub'] ? ($currentEp ?: '?') : '—') . '</span>'
+            . '<span><i class="fas fa-microphone"></i> ' . (!empty($item['has_dub']) ? ($currentEp ?: '?') : '—') . '</span>'
             . '<span><i class="fas fa-layer-group"></i> ' . ($totalEps ?: '?') . '</span>'
             . '</div>';
     }
@@ -155,7 +168,7 @@ function render_anime_card($item, array $opts = []) {
         <a href="{$link}" class="kp-card-link" style="text-decoration:none;">
             <div class="movie-card" data-id="{$cardId}">
                 <div class="thumb-wrapper">
-                    <img src="{$poster}" alt="{$title}" loading="lazy" onerror="this.onerror=null;this.src='./uploads/thumbnails/default.png';">
+                    <img src="{$posterEsc}" alt="{$title}"{$posterAttrs} onerror="this.onerror=null;this.src='./uploads/thumbnails/default.png';">
                     <div class="kp-card-rating-badge">{$ratingHtml}</div>
                     <div class="kp-card-hover-overlay">
                         <button type="button" class="kp-card-play-btn" aria-label="Play" onclick="event.preventDefault();event.stopPropagation();window.location.href=this.closest('a').href;"><i class="fas fa-play"></i></button>
@@ -193,11 +206,16 @@ function render_trend_item(array $item, $rank) {
     $total  = $item['episodes'] ?? '?';
     $dub    = !empty($item['has_dub']) ? $sub : '?';
 
+    // The thumbnail in a trending row is a background strip, ~half the row on
+    // a phone — describe it so the browser can pick a small variant.
+    $bannerAttrs = kp_img_attrs($banner, ['sizes' => '(max-width: 1024px) 46vw, 300px']);
+    $bannerEsc   = kp_e($banner);
+
     $scoreHtml = $score ? '<span class="kp-trend-score"><i class="fas fa-star"></i> ' . kp_e($score) . '</span>' : '';
 
     return <<<HTML
     <a href="{$link}" class="kp-trend-item">
-        <div class="kp-trend-bg"><img src="{$banner}" alt="" loading="lazy"></div>
+        <div class="kp-trend-bg"><img src="{$bannerEsc}" alt=""{$bannerAttrs}></div>
         <div class="kp-trend-overlay"></div>
         <span class="kp-trend-rank">{$rank}</span>
         <div class="kp-trend-info">
@@ -320,11 +338,18 @@ function kp_hero_slide_body(array $item, $tag, $logo = null) {
 
     // A logo (hand-picked or TMDB) replaces the text title when we have one.
     $hasLogo  = is_string($logo) && $logo !== '';
-    $logoHtml = $hasLogo ? '<img class="kp-hero-logo" src="' . kp_e($logo) . '" alt="' . $title . '" decoding="async">' : '';
+    $logoHtml = $hasLogo ? '<img class="kp-hero-logo" src="' . kp_e($logo) . '" alt="' . $title . '" decoding="async" fetchpriority="low">' : '';
     $copyClass = $hasLogo ? 'kp-hero-copy has-logo' : 'kp-hero-copy';
 
+    /*
+     * Only the first slide is server-rendered, and it owns the viewport: the
+     * banner is the LCP element, so it is eager with a high priority hint and
+     * a 100vw sizes hint (banners have no CDN variants, posters do).
+     */
+    $bgAttrs = kp_img_attrs($bg, ['sizes' => '100vw', 'priority' => true]);
+
     return <<<HTML
-        <img class="kp-hero-bg" src="{$bg}" alt="" loading="eager" decoding="async">
+        <img class="kp-hero-bg" src="{$bg}" alt=""{$bgAttrs}>
         <div class="kp-hero-shade"></div>
         <div class="kp-hero-body">
             <div class="{$copyClass}">

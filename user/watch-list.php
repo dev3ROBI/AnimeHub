@@ -194,7 +194,7 @@ foreach ($items as $it) {
                             <a href="<?= htmlspecialchars($it['url'], ENT_QUOTES, 'UTF-8') ?>">
                                 <img class="kp-wl-card-poster"
                                      src="<?= htmlspecialchars($it['poster'], ENT_QUOTES, 'UTF-8') ?>"
-                                     alt="<?= htmlspecialchars($it['title'], ENT_QUOTES, 'UTF-8') ?>" loading="lazy"
+                                     alt="<?= htmlspecialchars($it['title'], ENT_QUOTES, 'UTF-8') ?>"<?= kp_img_attrs($it['poster'], ['sizes' => '30vw']) ?>
                                      onerror="this.onerror=null;this.src='./uploads/thumbnails/default.png';">
                             </a>
 

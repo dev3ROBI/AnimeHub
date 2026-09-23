@@ -104,7 +104,8 @@ if (!empty($user['User_Join'])) {
                 <?php if (!empty($coverAnime)): ?>
                     <div class="kp-prof-cover-mosaic">
                         <?php foreach ($coverAnime as $i => $img): ?>
-                            <img src="<?= htmlspecialchars($img, ENT_QUOTES, 'UTF-8') ?>" alt="" class="kp-prof-cover-img kp-prof-cover-img-<?= $i ?>" loading="eager">
+                            <?php /* First tile paints with the page, the rest wait: six eager posters used to fight the LCP image. */ ?>
+                            <img src="<?= htmlspecialchars($img, ENT_QUOTES, 'UTF-8') ?>" alt="" class="kp-prof-cover-img kp-prof-cover-img-<?= $i ?>"<?= kp_img_attrs($img, ['sizes' => '45vw', 'eager' => $i === 0]) ?>>
                         <?php endforeach; ?>
                     </div>
                     <div class="kp-prof-cover-glass"></div>
@@ -114,7 +115,7 @@ if (!empty($user['User_Join'])) {
                 <div class="kp-prof-avatar-wrap">
                     <img id="prof-avatar" data-kp-avatar-img class="kp-prof-avatar"
                          src="<?= htmlspecialchars($avatarUrl, ENT_QUOTES, 'UTF-8') ?>"
-                         alt="Profile avatar">
+                         alt="Profile avatar" decoding="async">
                     <button type="button" class="kp-prof-avatar-edit" data-kp-avatar-open
                             title="Change anime avatar" aria-label="Change anime avatar">
                         <i class="fas fa-camera"></i>
@@ -237,6 +238,23 @@ if (!empty($user['User_Join'])) {
 </div>
 <!-- /Profile Main Container -->
 
+<?php
+/*
+ * Fragment scripts for the profile tabs. Built here (rather than inline in the
+ * JS) so each URL gets the same mtime cache-buster — and the minified build —
+ * that header.php applies to the shared scripts.
+ */
+$kpTabScripts = [];
+foreach ([
+    'continue-watching' => 'user/js/continue-watching.js',
+    'watch-list'        => 'user/js/watch-list.js',
+    'notification'      => 'user/js/notification.js',
+    'stats'             => 'user/js/stats.js',
+    'settings'          => 'user/js/settings.js',
+] as $kpTabKey => $kpTabFile) {
+    $kpTabScripts[$kpTabKey] = [kp_asset('js', $kpTabFile)];
+}
+?>
 <script>
     document.addEventListener('DOMContentLoaded', function () {
         const tabs = document.querySelectorAll('.nav-link[data-target]');
@@ -248,13 +266,9 @@ if (!empty($user['User_Join'])) {
         // Scripts inside a fragment set with innerHTML never run, so each tab
         // that needs behaviour ships a real file and declares it here. They are
         // re-fetched on every visit (the DOM they bind to is replaced each time).
-        const TAB_SCRIPTS = {
-            'continue-watching': ['./user/js/continue-watching.js'],
-            'watch-list':        ['./user/js/watch-list.js'],
-            'notification':      ['./user/js/notification.js'],
-            'stats':             ['./user/js/stats.js'],
-            'settings':          ['./user/js/settings.js']
-        };
+        // The URLs come from PHP so they carry the same mtime cache-buster (and
+        // the .min.js build) as the scripts header.php loads.
+        const TAB_SCRIPTS = <?= json_encode($kpTabScripts, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 
         // Only fragments that actually exist can be fetched. Without this the
         // `?tab=` query string went straight into the request URL, so any other
@@ -415,7 +429,7 @@ if (!empty($user['User_Join'])) {
     </div>
 </div>
 
-<script src="./user/js/avatar-picker.js" defer></script>
-<script src="./user/js/rank-modal.js" defer></script>
+<script src="<?= htmlspecialchars(kp_asset('js', 'user/js/avatar-picker.js'), ENT_QUOTES, 'UTF-8') ?>" defer></script>
+<script src="<?= htmlspecialchars(kp_asset('js', 'user/js/rank-modal.js'), ENT_QUOTES, 'UTF-8') ?>" defer></script>
 
 <?php include 'includes/footer.php'; ?>

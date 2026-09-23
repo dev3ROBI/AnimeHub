@@ -308,7 +308,7 @@
                 if (item.more > 0) chips += '<span class="kp-day-chip is-more">+' + item.more + '</span>';
 
                 html += '<a class="kp-day-row" href="' + escapeHtml(item.url || '#') + '">'
-                    + '<span class="kp-day-poster">' + (item.poster ? '<img src="' + escapeHtml(item.poster) + '" alt="" loading="lazy">' : '') + '</span>'
+                    + '<span class="kp-day-poster">' + (item.poster ? '<img src="' + escapeHtml(item.poster) + '" alt="" loading="lazy" decoding="async">' : '') + '</span>'
                     + '<span class="kp-day-main">'
                     +   '<span class="kp-day-name">' + escapeHtml(item.title || item.slug || '') + '</span>'
                     +   (chips ? '<span class="kp-day-chips">' + chips + '</span>' : '')

@@ -205,7 +205,7 @@ $quickStats = [
                     <a class="kp-top10-card" href="<?= kp_e(kp_watch_url($item)) ?>">
                         <span class="kp-top10-rank"><?= $i + 1 ?></span>
                         <div class="kp-top10-poster">
-                            <img src="<?= kp_e($t10Poster) ?>" alt="<?= $t10Title ?>" loading="lazy" onerror="this.onerror=null;this.src='./uploads/thumbnails/default.png';">
+                            <img src="<?= kp_e($t10Poster) ?>" alt="<?= $t10Title ?>"<?= kp_img_attrs($t10Poster, ['sizes' => '128px']) ?> onerror="this.onerror=null;this.src='./uploads/thumbnails/default.png';">
                             <span class="kp-top10-play"><i class="fas fa-play"></i></span>
                         </div>
                         <div class="kp-top10-info">
@@ -251,7 +251,7 @@ $quickStats = [
                         <a href="<?= $cwLink ?>" class="kp-card-link" style="text-decoration:none;">
                             <div class="movie-card">
                                 <div class="thumb-wrapper">
-                                    <img src="<?= $cwPoster ?>" alt="<?= $cwTitle ?>" loading="lazy" onerror="this.onerror=null;this.src='./uploads/thumbnails/default.png';">
+                                    <img src="<?= kp_e($cwPoster) ?>" alt="<?= $cwTitle ?>"<?= kp_img_attrs($cwPoster, ['sizes' => '30vw']) ?> onerror="this.onerror=null;this.src='./uploads/thumbnails/default.png';">
                                     <div class="kp-card-rating-badge"></div>
                                     <div class="kp-card-hover-overlay">
                                         <button type="button" class="kp-card-play-btn" aria-label="Play"><i class="fas fa-play"></i></button>
@@ -407,7 +407,7 @@ $quickStats = [
                     $upMeta   = $item['year'] ?: ($item['status'] ?? 'TBA');
                     ?>
                     <a class="kp-side-item" href="<?= kp_e(kp_watch_url($item)) ?>">
-                        <img class="kp-side-thumb" src="<?= kp_e($upPoster) ?>" alt="" loading="lazy" onerror="this.onerror=null;this.src='./uploads/thumbnails/default.png';">
+                        <img class="kp-side-thumb" src="<?= kp_e($upPoster) ?>" alt=""<?= kp_img_attrs($upPoster, ['sizes' => '72px']) ?> onerror="this.onerror=null;this.src='./uploads/thumbnails/default.png';">
                         <div class="kp-side-info">
                             <span class="kp-side-title"><?= $upTitle ?></span>
                             <div class="kp-side-meta">

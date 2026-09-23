@@ -99,10 +99,10 @@
         const card = document.createElement('article');
         card.className = 'kp-cw-hero';
         card.innerHTML =
-            '<img class="kp-cw-hero-bg" src="' + esc(bg) + '" alt="" loading="lazy">'
+            '<img class="kp-cw-hero-bg" src="' + esc(bg) + '" alt="" loading="lazy" decoding="async">'
           + '<div class="kp-cw-hero-shade"></div>'
           + '<div class="kp-cw-hero-body">'
-          +   '<img class="kp-cw-hero-poster" src="' + esc(posterOf(item)) + '" alt="" loading="lazy">'
+          +   '<img class="kp-cw-hero-poster" src="' + esc(posterOf(item)) + '" alt="" loading="lazy" decoding="async">'
           +   '<div class="kp-cw-hero-copy">'
           +     '<span class="kp-cw-tag"><i class="fas fa-play"></i> Next up</span>'
           +     '<h3 class="kp-cw-hero-title"></h3>'
@@ -146,7 +146,7 @@
         card.className = 'kp-cw-card';
         card.innerHTML =
             '<a class="kp-cw-thumb" href="' + esc(item.url) + '">'
-          +   '<img src="' + esc(posterOf(item)) + '" alt="" loading="lazy">'
+          +   '<img src="' + esc(posterOf(item)) + '" alt="" loading="lazy" decoding="async">'
           +   (rating ? '<span class="kp-cw-rating"><i class="fas fa-star"></i> ' + esc(rating) + '</span>' : '')
           +   '<span class="kp-cw-ep">' + esc(epLabel(item)) + '</span>'
           +   (pct > 0 ? '<span class="kp-cw-progress"><span style="width:' + pct + '%"></span></span>' : '')

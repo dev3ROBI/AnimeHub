@@ -1,3 +1,15 @@
+<?php
+/*
+ * Front-end performance layer — gzip output buffer, cache-busted/minified
+ * asset URLs, responsive-image srcset helpers. Included before the first byte
+ * of markup so the compression buffer is already in place.
+ */
+include_once __DIR__ . '/performance.php';
+
+// One Google Fonts request instead of three, plus the DNS/TLS warnings for the
+// image CDNs the catalogue streams from.
+[$kpFontsUrl, $kpPreconnectHosts] = kp_font_and_cdn_hints();
+?>
 <!DOCTYPE html>
 <html lang="en">
 
@@ -10,25 +22,36 @@
     <title>KitsuPlay · Anime Streaming</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Fira+Code&display=swap" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css?family=Tangerine" rel="stylesheet">
+    <?php foreach ($kpPreconnectHosts as $kpHost): ?>
+    <link rel="preconnect" href="<?= htmlspecialchars($kpHost, ENT_QUOTES, 'UTF-8') ?>" />
+    <?php endforeach; ?>
+    <link href="<?= htmlspecialchars($kpFontsUrl, ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+
     <?php
     /*
-     * Cache-busted stylesheet URLs.
-     *
-     * A layout fix that only reaches the browser after a manual Ctrl+Shift+R is
-     * worse than no fix, so every local sheet carries its own mtime — the URL
-     * changes exactly when the file does.
+     * Above-the-fold CSS is inlined (one round trip saved, first paint no
+     * longer waits on ~100 KB of sheets). The full sheets follow asynchronously
+     * with a <noscript> fallback, and the async copy always wins on conflicts
+     * because it is parsed later.
      */
-    $kpCssVersion = static function ($file) {
-        $path = __DIR__ . '/../assets/css/' . $file;
-        return is_file($path) ? (string)filemtime($path) : '1';
+    $kpCriticalCss = kp_inline_css('critical.css');
+    if ($kpCriticalCss !== ''):
+    ?>
+    <style><?= $kpCriticalCss ?></style>
+    <?php endif; ?>
+
+    <?php
+    /* Stylesheet tag for a sheet that must not block the first paint. */
+    $kpLazyCss = static function ($file) {
+        $url = kp_asset('css', $file);
+        echo '<link rel="stylesheet" href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '" media="print" onload="this.media=\'all\'">' . "\n";
+        echo '    <noscript><link rel="stylesheet" href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '"></noscript>' . "\n";
     };
     ?>
-    <link rel="stylesheet" href="./assets/css/nav_style.css?v=<?= $kpCssVersion('nav_style.css') ?>" />
-    <link rel="stylesheet" href="./assets/css/home.css?v=<?= $kpCssVersion('home.css') ?>" />
+    <?php $kpLazyCss('nav_style.css'); ?>
+    <?php $kpLazyCss('home.css'); ?>
+
     <?php
     /* Page-specific CSS/JS — skip heavy sheets on pages that don't need them,
        especially on low-end mobile where every KB matters. */
@@ -37,13 +60,13 @@
                    strpos($_SERVER['SCRIPT_NAME'] ?? '', 'tv.php') !== false;
     ?>
     <?php if ($kp_is_auth): ?>
-    <link rel="stylesheet" href="./assets/css/authentication.css?v=<?= $kpCssVersion('authentication.css') ?>" />
+    <link rel="stylesheet" href="<?= htmlspecialchars(kp_asset('css', 'authentication.css'), ENT_QUOTES, 'UTF-8') ?>" />
     <?php endif; ?>
     <?php if ($kp_is_auth || strpos($_SERVER['SCRIPT_NAME'] ?? '', 'profile') !== false): ?>
-    <link rel="stylesheet" href="./assets/css/profile.css?v=<?= $kpCssVersion('profile.css') ?>" />
+    <link rel="stylesheet" href="<?= htmlspecialchars(kp_asset('css', 'profile.css'), ENT_QUOTES, 'UTF-8') ?>" />
     <?php endif; ?>
     <?php if ($kp_is_watch): ?>
-    <link rel="stylesheet" href="./assets/css/watch_page_style.css?v=<?= $kpCssVersion('watch_page_style.css') ?>" />
+    <link rel="stylesheet" href="<?= htmlspecialchars(kp_asset('css', 'watch_page_style.css'), ENT_QUOTES, 'UTF-8') ?>" />
     <!-- ArtPlayer Core CSS and JS — only on watch pages -->
     <link rel="stylesheet" href="https://unpkg.com/artplayer/dist/artplayer.css">
     <script src="https://unpkg.com/artplayer/dist/artplayer.js" defer></script>
@@ -55,16 +78,13 @@
 
     <!-- Shared UI behaviour -->
     <?php
-    // Same mtime trick for the local scripts.
-    $kpJsVersion = static function ($file) {
-        $path = __DIR__ . '/../assets/js/' . $file;
-        return is_file($path) ? (string)filemtime($path) : '1';
-    };
+    // Same cache-busting for the local scripts (kp_asset() also swaps in the
+    // .min.js build whenever tools/minify.php has produced a fresh one).
     ?>
-    <script src="./assets/js/hero-slider.js?v=<?= $kpJsVersion('hero-slider.js') ?>" defer></script>
-    <script src="./assets/js/card-preview.js?v=<?= $kpJsVersion('card-preview.js') ?>" defer></script>
-    <script src="./assets/js/home-sections.js?v=<?= $kpJsVersion('home-sections.js') ?>" defer></script>
-    <script src="./assets/js/genre-scroll.js?v=<?= $kpJsVersion('genre-scroll.js') ?>" defer></script>
+    <script src="<?= htmlspecialchars(kp_asset('js', 'hero-slider.js'), ENT_QUOTES, 'UTF-8') ?>" defer></script>
+    <script src="<?= htmlspecialchars(kp_asset('js', 'card-preview.js'), ENT_QUOTES, 'UTF-8') ?>" defer></script>
+    <script src="<?= htmlspecialchars(kp_asset('js', 'home-sections.js'), ENT_QUOTES, 'UTF-8') ?>" defer></script>
+    <script src="<?= htmlspecialchars(kp_asset('js', 'genre-scroll.js'), ENT_QUOTES, 'UTF-8') ?>" defer></script>
 </head>
 
 

@@ -1,0 +1,114 @@
+# =============================================================================
+#  KitsuPlay — mobile speed config (Apache / XAMPP)
+# =============================================================================
+#  Two things happen here:
+#
+#   1. Static assets get a long, immutable Cache-Control so repeat visits skip
+#      the network entirely. This is safe because header.php appends each
+#      file's mtime as ?v=… — touch a .css/.js and its URL changes.
+#   2. Text responses get compressed. mod_deflate is NOT loaded in a stock
+#      XAMPP, so <IfModule> keeps the block inert until it is; the HTML gzip
+#      meanwhile comes from includes/performance.php (zlib). Enable the module
+#      in D:\xampp\apache\conf\httpd.conf by uncommenting:
+#          LoadModule deflate_module modules/mod_deflate.so
+#          LoadModule expires_module  modules/mod_expires.so
+#          LoadModule filter_module   modules/mod_filter.so
+#
+#  Apache needs AllowOverride All for this file to be read (XAMPP has it on for
+#  htdocs). DocumentRoot here is D:/xampp/htdocs, app path /AnimeHub.
+# =============================================================================
+
+# ─── Default charset / MIME types ────────────────────────────────────────────
+AddDefaultCharset UTF-8
+<IfModule mod_mime.c>
+    AddType image/webp  .webp
+    AddType image/avif  .avif
+    AddType font/woff2  .woff2
+</IfModule>
+
+# ─── 1. Compression ──────────────────────────────────────────────────────────
+<IfModule mod_deflate.c>
+    # Only compress what we actually serve, and never re-compress images,
+    # video or fonts — they are already compressed formats.
+    AddOutputFilterByType DEFLATE text/html text/plain text/css text/xml \
+        text/javascript application/javascript application/x-javascript \
+        application/json application/xml image/svg+xml \
+        application/manifest+json
+
+    <IfModule mod_filter.c>
+        FilterDeclare  COMPRESS
+        FilterProvider COMPRESS DEFLATE resp=Content-Type $text/html
+        FilterProvider COMPRESS DEFLATE resp=Content-Type $text/css
+        FilterProvider COMPRESS DEFLATE resp=Content-Type $application/javascript
+        FilterProvider COMPRESS DEFLATE resp=Content-Type $application/json
+        FilterProvider COMPRESS DEFLATE resp=Content-Type $image/svg+xml
+        FilterChain    COMPRESS
+    </IfModule>
+
+    # Brotli, when the module happens to be available (mod_brotli): smaller
+    # than gzip for CSS/JS and understood by every current mobile browser.
+    <IfModule mod_brotli.c>
+        AddOutputFilterByType BROTLI_COMPRESS text/html text/css \
+            text/javascript application/javascript application/json image/svg+xml
+    </IfModule>
+
+    DeflateCompressionLevel 6
+    # Compression changes the body, so caches (and the PHP-side gzip) must key
+    # on it, and Vary must not be dropped by an earlier header.
+    Header append Vary Accept-Encoding
+</IfModule>
+
+# ─── 2. Browser caching ──────────────────────────────────────────────────────
+<IfModule mod_headers.c>
+    # CSS / JS: hashed by ?v=<mtime>, so a year is safe.
+    <FilesMatch "\.(css|js)$">
+        Header set Cache-Control "public, max-age=31536000, immutable"
+    </FilesMatch>
+
+    # Fonts and local images never change under the same name.
+    <FilesMatch "\.(woff2?|ttf|eot|otf|svg|png|jpe?g|gif|webp|avif|ico)$">
+        Header set Cache-Control "public, max-age=2592000"
+    </FilesMatch>
+
+    # Video / audio segments are big and stable.
+    <FilesMatch "\.(mp4|webm|m4v|m3u8|ts|mp3|m4a)$">
+        Header set Cache-Control "public, max-age=604800"
+    </FilesMatch>
+
+    # PHP answers are session-specific: never let a proxy or the bfcache pin
+    # them. API/JSON endpoints included by JS tolerate a revalidation.
+    <FilesMatch "\.php$">
+        Header set Cache-Control "private, no-cache, must-revalidate"
+    </FilesMatch>
+
+    # Cheap hardening that costs nothing at runtime.
+    Header unset X-Powered-By
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType text/css                  "access plus 1 year"
+    ExpiresByType text/javascript           "access plus 1 year"
+    ExpiresByType application/javascript    "access plus 1 year"
+    ExpiresByType image/webp                "access plus 1 month"
+    ExpiresByType image/avif                "access plus 1 month"
+    ExpiresByType image/jpeg                "access plus 1 month"
+    ExpiresByType image/png                 "access plus 1 month"
+    ExpiresByType image/svg+xml             "access plus 1 month"
+    ExpiresByType font/woff2                "access plus 1 year"
+    ExpiresByType text/html                 "access plus 0 seconds"
+</IfModule>
+
+# ─── 3. Keep-alive / ETag ────────────────────────────────────────────────────
+<IfModule mod_headers.c>
+    # ETag would be identical in spirit to the ?v= we already send; turning it
+    # off removes a pointless conditional request per asset.
+    FileETag None
+</IfModule>
+
+# ─── 4. Never serve these over HTTP ──────────────────────────────────────────
+<FilesMatch "\.(md|json|lock|log|sql|bak|ini)$">
+    Require all denied
+</FilesMatch>

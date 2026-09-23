@@ -1012,9 +1012,9 @@ include_once './includes/header.php';
     <div class="movie-details kp-detail-hero">
         <div class="kp-detail-bg" aria-hidden="true">
             <?php if (!empty($banner_url)): ?>
-                <img src="<?= kp_e($banner_url) ?>" alt="" loading="lazy">
+                <img src="<?= kp_e($banner_url) ?>" alt=""<?= kp_img_attrs($banner_url, ['sizes' => '100vw']) ?>>
             <?php elseif (!empty($poster_url)): ?>
-                <img src="<?= kp_e($poster_url) ?>" alt="" loading="lazy">
+                <img src="<?= kp_e($poster_url) ?>" alt=""<?= kp_img_attrs($poster_url, ['sizes' => '100vw']) ?>>
             <?php endif; ?>
             <div class="kp-detail-bg-shade"></div>
         </div>
@@ -1100,7 +1100,7 @@ include_once './includes/header.php';
                 <div class="kp-cast-card">
                     <div class="kp-cast-photo">
                         <?php if (!empty($c['photo'])): ?>
-                            <img src="<?= kp_e($c['photo']) ?>" alt="<?= kp_e($c['name']) ?>" loading="lazy">
+                            <img src="<?= kp_e($c['photo']) ?>" alt="<?= kp_e($c['name']) ?>"<?= kp_img_attrs($c['photo'], ['sizes' => '90px']) ?>>
                         <?php else: ?>
                             <span class="kp-cast-initial"><?= kp_e(mb_strtoupper(mb_substr($c['name'], 0, 1))) ?></span>
                         <?php endif; ?>
