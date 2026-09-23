@@ -1,7 +1,7 @@
 # AnimeHub — Handoff
 
 > Purpose: any future session (or dev) can pick up exactly where work stopped.
-> Last updated: 2026-09-24 (TMDB TV episode list parity with the AniList sidebar).
+> Last updated: 2026-09-24 (hover preview + shared watchlist modal + enhanced search & notifications).
 
 ## 1. Project snapshot
 
@@ -10,6 +10,80 @@
 - **Repo:** `https://github.com/dev3ROBI/AnimeHub.git`, branch `main`.
 
 ## 2. Completed work
+
+### Hover preview + shared watchlist modal + enhanced search & notifications (IMPLEMENTED)
+
+**1. Hover preview card (`card-preview.js` + `kp_preview_payload()` + `home.css`)**
+- "Watch Now" CTA removed — the panel is pure details; the whole card is still the link.
+- New availability strip: release-status pill (Released / Airing Now / Upcoming / Cancelled / Hiatus, provider-status mapped in `statusInfo()`) + real count ("1179 EP", "1179 / 1179 EP" airing vs total, "38S · 1179 EP" TMDB TV, "Movie").
+- Payload gains `ae` (aired episodes actually OUT), `ct` (content_type movie/tv), `na` (next airing `{e, ts}` only while ts > now); TMDB TV swaps `ae` to `total_episodes`.
+- "Episode N in **2d 4h**" line under the strip, rendered as a `.kp-cd[data-release]` chip so `countdown.js` ticks it and flips it to green "Airing now" (scan re-armed via `kpCountdownScan()`). `window.kpCountdownFmt` is the shared JS formatter (matches `kp_time_left()`).
+- CSS: `.kp-preview-avail/-count/-next` + `.kp-status-upcoming/-off`; old `.kp-preview-foot/-cta` deleted.
+
+**2. Watchlist + button on every page (`includes/watchlist_modal.php`, new)**
+- The modal + `openCardWatchlist/saveCardWatchlist/removeCardWatchlist` JS moved out of index.php into `includes/watchlist_modal.php`, included by `includes/footer.php` (guarded by `$kp_watchlist_modal_done`) — every page with cards now has the same add-to-list flow (verified: index/genre/schedule/movies/tv/profile/watch).
+- Guests get a `kpToast` "Log in to add titles…" (login-redirect toast) instead of a silent 403. Login state rides on `<body data-user="1|0">` (header.php).
+- Card `+` buttons now sync: after save the button on the affected card flips to a green tick (`.kp-card-add-btn.is-saved`), after remove back to `+`.
+
+**3. Enhanced search (`includes/search.php` + header.php UI + nav_style.css)**
+- Backend: `?kind=all|anime|movie|tv` filter (`search_kind_of()` classifies content_type → tmdb movie/tv → format); richer rows `{title, kind, imdb_id, source, poster, year, rating, episodes, status}` with normalized status (Airing/Upcoming/Released).
+- UI: filter chip row (All/Anime/Movies/TV — switching re-runs the query), status pill + kind badge per row, kind+EP in the meta line, empty state names the active filter.
+- Keyboard: ↑/↓ move the highlight, Enter opens the highlighted (or first) row, plain Enter with no results saves the term to history. Aborted fetches properly race-guarded (`searchAbort`).
+- History rows restyled (classes instead of inline styles: `.kp-history-term/-del/-clear`).
+
+**4. Notifications (`check_notifications.php` + header.php + nav_style.css)**
+- **TV follows now actually alert**: `follows` accept `tmdb:tv:N` slugs (regex `^tmdb:tv:\d+$`), and watchlist rows marked Watching track via `follow` (so follow_alerts=0 silences them); TMDB sweep backfills missing `follows.anime_title` from the detail call.
+- UI: type filter tabs (All / Episodes / System), Load-more button (15/page, uses the endpoint's existing `pages`), per-filter empty states, poll only re-renders while the panel is closed; `unread` no longer double-counted when clicking rows.
+
+Files: `includes/functions.php`, `includes/header.php`, `includes/footer.php`, `includes/watchlist_modal.php` (new), `includes/search.php`, `includes/check_notifications.php`, `index.php` (modal removed), `assets/js/card-preview.js`, `assets/css/home.css`, `assets/css/nav_style.css`, `sw.js` (VERSION `v5`→`v6`).
+
+### Session follow-up 3: premium sidebar (trending ranks + Upcoming day tabs + My Pulse) (IMPLEMENTED)
+
+1. **Top Trending premium look** — `render_trend_item()` (`includes/functions.php`) now emits an air-status pill (`kp-trend-status`: pulsing green Airing / amber Upcoming / quiet Released, unknown stays silent), a next-episode strip (`kp-trend-next`: "EP 5 · 2d 4h" from `next_airing`), and an `is-top` class for ranks 1–3. CSS (`home.css`): gradient medals (gold/silver/bronze `-webkit-background-clip:text`) on the top-3 ranks, glowing red left edge on podium rows, glass card rows with red hover glow + lift, banner zoom on hover, gradient play button reveal.
+2. **Upcoming day tabs** — `kp_group_upcoming()` + `render_upcoming_item()` (`functions.php`) split the upcoming fetch into TODAY (rest of today + 12h grace) / NEXT (tomorrow…7d) / LATER (beyond/undated), each sorted by air time (undated last). index.php renders 3 panes + TODAY/NEXT/LATER tabs (default tab = first non-empty group); `home-sections.js` toggles panes (pure class toggle, zero network, stacks without JS). Rows show "EP 4 · Fri, 25 Sep" + live countdown chip; empty groups get a friendly `kp-up-empty` note.
+3. **Second side panel: My Pulse** — index.php sidebar now has a third card under Upcoming: Continue Watching (top 3 from `progress_recent_anime`, poster + "S2 · EP 4" + gradient progress bar + %) with graceful empty state, plus a 2×2 Shortcuts grid (Schedule / Watchlist / Alerts / Settings).
+
+Files: `includes/functions.php`, `index.php`, `assets/js/home-sections.js`, `assets/css/home.css`, `sw.js` (VERSION → `v9`). Verified: `php -l` ✓, `node --check` ✓, minify rebuilt ✓, server-render check — 10 trend rows (3 podium, 10 status pills, 4 next-EP strips), 3 up-panes (active = first non-empty), pulse card + empty state ✓.
+
+### Session follow-up: dropdown fix + TMDB airing status + preview anchor (IMPLEMENTED)
+
+1. **Navbar dropdowns dead** — the notification-JS rewrite had left a duplicated `.then()` block after the tab-handler code, so inline script 2 threw `Unexpected token '}'` on every page: no search/notification/user popup opened. The dead block (header.php ~1177–1246) is removed; all 4 inline scripts parse (`new Function` check).
+2. **TMDB TV showed "Released" while episodes are Coming Soon** — `tmdb_apply_availability()` (new, `tmdb_movie_api.php`) now derives real availability from air dates inside both normalizers: `next_episode_to_air` future → RELEASING/NOT_YET_RELEASED + `next_airing` (feeds the hover "Episode N in 2d 4h" chip), `first_air_date` future → NOT_YET_RELEASED, TMDB status Canceled/Ended → FINISHED; `aired_episodes` counts seasons only up to the last aired one. List rows (trending/discover) carry no status/next-ep keys, so the hover card ALSO derives: `na.ts > now` → "Airing Now" regardless of the status string (card-preview.js `statusInfo`). Cached `detail:v4` payloads predate this — the derived fields compute at normalize time so only stale list caches matter (list TTL is short).
+3. **Which card is the preview for?** — `place()` now tags the panel with a side class (`kp-from-right/left/bottom`), CSS draws a rotated-square arrow pointing at the source card (`--kp-arrow-top` follows the card's midline), and the source card gets `.kp-preview-source` (accent ring + glow + lift) while its preview is open.
+
+Files: `includes/header.php`, `includes/tmdb_movie_api.php`, `assets/js/card-preview.js`, `assets/css/home.css`, `sw.js` (VERSION → `v7`).
+
+### Session follow-up 2: TMDB list rows resolve real status on hover (IMPLEMENTED)
+
+The deeper fix for "list page says Released while episodes are Coming Soon": TMDB's
+list/search/discover endpoints carry NO `status`, `next_episode_to_air` or
+`last_episode_to_air` keys, so a list row can never know if a show is airing.
+Instead of guessing:
+
+1. **PHP** — rows where status is unknowable get `tvq: 1` + `st: ''` (and
+   `aired_episodes: 0`) in `tmdb_apply_availability()`. `kp_preview_payload()`
+   forwards `tvq` into the card's data-kp JSON.
+2. **JS** — `statusInfo()` renders a neutral spinning "Details…" badge for
+   `tvq` rows instead of "Released"; `availCount()` hides the misleading EP count.
+3. **On first hover** — `resolveStatus()` fetches
+   `includes/tmdb_avail.php?id=…` (new; wraps the DB-cached
+   `tmdb_tv_detail`/`tmdb_movie_detail`), patches the card's `data-kp` live and
+   re-renders the open panel — so "Airing Now / Episode 2 in 1d 4h" fills in,
+   and every later hover of that card is instant from the patched payload.
+4. Detail cache keys bumped (`detail:v4`→`v5` tv, `detail:v2`→`v3` movie) so old
+   pre-derivation payloads don't serve stale status through the endpoint.
+   **NOTE:** list caches (`trending/popular/search/…`) cache the *normalized*
+   items — entries built before the tvq fix keep their guessed status until
+   their TTL expires (list TTLs are short) or the rows are cleared from
+   `api_cache`.
+
+Verified: tv.php now ships 20 `tvq:1` rows, 0 guessed "FINISHED";
+`tmdb_avail.php?id=tmdb:tv:247718` → `{"st":"RELEASING","ae":20,"na":{"e":2,"ts":…},"e":2}`;
+bad id → 400.
+
+Files: `includes/tmdb_movie_api.php`, `includes/tmdb_avail.php` (new),
+`includes/functions.php`, `assets/js/card-preview.js`, `assets/css/home.css`, `sw.js` (→ `v8`).
+Verified: `php -l` all touched files ✓ · `node --check` (src + min) ✓ · minify 20 built + `--check` fresh ✓ · live curl: search kind=movie filters correctly, `data-kp` payloads carry `ae/ct/na`, wl-modal present on all 7 page types with `+buttons`, notifications `?type=` + `pages` work, movie page shows `ct:"movie"` ✓ · 0 PHP warnings.
 
 ### Performance / PWA (previous sessions — details in `docs/performance.md`)
 - DB indexes, response caching (`api_cache_*` in `includes/http.php`), image lazy-loading + `kp_img_attrs`.

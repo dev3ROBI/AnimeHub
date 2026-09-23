@@ -399,162 +399,78 @@ $quickStats = [
             </div>
         </div>
 
-        <!-- Upcoming (moved out of the main column to keep it scannable) -->
+        <!-- Upcoming — day-grouped (Today / Next / Later), scannable like a mini schedule -->
         <?php if (!empty($upcoming)): ?>
+        <?php
+        $upGroups = kp_group_upcoming($upcoming);
+        // Default tab: the first group that actually has rows — an empty
+        // "TODAY" pane is a bad first impression.
+        $upDefault = 'today';
+        foreach ($upGroups as $upKey => $upRows) {
+            if ($upRows) { $upDefault = $upKey; break; }
+        }
+        ?>
         <div class="kp-sidebar-card">
             <div class="kp-sidebar-head">
                 <h3>Upcoming</h3>
-                <a href="./schedule.php" class="kp-view-all">Schedule <i class="fas fa-arrow-right"></i></a>
+                <div class="kp-trend-tabs kp-up-tabs" id="upTabs">
+                    <button class="kp-trend-tab<?= $upDefault === 'today' ? ' active' : '' ?>" data-up="today">TODAY</button>
+                    <button class="kp-trend-tab<?= $upDefault === 'next' ? ' active' : '' ?>" data-up="next">NEXT</button>
+                    <button class="kp-trend-tab<?= $upDefault === 'later' ? ' active' : '' ?>" data-up="later">LATER</button>
+                </div>
             </div>
-            <div class="kp-side-list">
-                <?php foreach (array_slice($upcoming, 0, 6) as $item): ?>
-                    <?php
-                    $upTitle  = kp_e($item['title'] ?? 'Unknown');
-                    $upPoster = $item['poster'] ?: './uploads/thumbnails/default.png';
-                    $upFormat = $item['format'] ?: ($item['type'] ?? 'TV');
-                    $upMeta   = $item['year'] ?: ($item['status'] ?? 'TBA');
-                    // Arrival: exact air time when AniList schedules it, else the
-                    // known start date for not-yet-released titles.
-                    $upAirTs  = (int)($item['next_airing']['airingAt'] ?? 0);
-                    $upAirTxt = '';
-                    if ($upAirTs > 0) {
-                        $upAirTxt = 'Arrives ' . date('D, d M', $upAirTs);
-                    } elseif (($item['status'] ?? '') === 'NOT_YET_RELEASED' && !empty($item['aired']) && $item['aired'] !== 'N/A') {
-                        $upAirTxt = 'Premieres ' . $item['aired'];
-                    }
-                    ?>
-                    <a class="kp-side-item" href="<?= kp_e(kp_watch_url($item)) ?>">
-                        <img class="kp-side-thumb" src="<?= kp_e($upPoster) ?>" alt=""<?= kp_img_attrs($upPoster, ['sizes' => '72px']) ?> onerror="this.onerror=null;this.src='./uploads/thumbnails/default.png';">
-                        <div class="kp-side-info">
-                            <span class="kp-side-title"><?= $upTitle ?></span>
-                            <div class="kp-side-meta">
-                                <span class="kp-side-badge"><?= kp_e($upFormat) ?></span>
-                                <span><?= kp_e($upMeta) ?></span>
-                            </div>
-                            <?php if ($upAirTxt !== ''): ?>
-                                <div class="kp-side-air">
-                                    <i class="fas fa-clock"></i>
-                                    <span><?= kp_e($upAirTxt) ?></span>
-                                    <?= $upAirTs > 0 ? kp_countdown_chip($upAirTs) : '' ?>
-                                </div>
-                            <?php endif; ?>
-                        </div>
-                        <i class="fas fa-chevron-right kp-side-go"></i>
-                    </a>
-                <?php endforeach; ?>
-            </div>
+            <?php foreach ($upGroups as $groupKey => $groupItems): ?>
+                <div class="kp-side-list kp-up-pane<?= $groupKey === $upDefault ? ' active' : '' ?>" data-up-pane="<?= kp_e($groupKey) ?>">
+                    <?php if (!$groupItems): ?>
+                        <p class="kp-up-empty"><i class="fa-solid fa-cloud-moon"></i> Nothing airing <?= kp_e($groupKey === 'today' ? 'today' : ($groupKey === 'next' ? 'this week' : 'in this range yet')) ?> — check back soon.</p>
+                    <?php endif; ?>
+                    <?php foreach (array_slice($groupItems, 0, 7) as $item): ?>
+                        <?= render_upcoming_item($item) ?>
+                    <?php endforeach; ?>
+                </div>
+            <?php endforeach; ?>
         </div>
         <?php endif; ?>
-    </div>
 
-</div>
-
-<!-- Watchlist Modal -->
-<div class="kp-wl-modal-overlay" id="kpWlModal">
-    <div class="kp-wl-modal">
-        <div class="kp-wl-modal-header">
-            <h4><i class="fas fa-list-ul"></i> Add to List</h4>
-            <button type="button" class="kp-wl-modal-close" onclick="closeCardWatchlist()"><i class="fas fa-xmark"></i></button>
+        <!-- My Pulse — continue where you left off + one-tap shortcuts -->
+        <div class="kp-sidebar-card kp-pulse-card">
+            <div class="kp-sidebar-head">
+                <h3><i class="fas fa-satellite-dish kp-pulse-ico"></i> My Pulse</h3>
+            </div>
+            <?php if ($recentlyWatched): ?>
+            <div class="kp-pulse-label">Continue Watching</div>
+            <div class="kp-pulse-list">
+                <?php foreach (array_slice($recentlyWatched, 0, 3) as $rw):
+                    $rwEp = (int)($rw['episode'] ?? 1);
+                    $rwSeason = (int)($rw['season_number'] ?? 0);
+                    $rwSub = $rwSeason > 0 ? 'S' . $rwSeason . ' · EP ' . $rwEp : 'EP ' . $rwEp;
+                    $rwPct = max(2, min(100, (int)round((float)($rw['watch_percent'] ?? 0))));
+                    $rwPoster = $rw['poster'] ?: './uploads/thumbnails/default.png';
+                ?>
+                <a class="kp-pulse-item" href="<?= kp_e(kp_watch_url($rw, $rwEp, $rwSeason ?: null)) ?>">
+                    <img class="kp-pulse-thumb" src="<?= kp_e($rwPoster) ?>" alt="" loading="lazy" onerror="this.onerror=null;this.src='./uploads/thumbnails/default.png';">
+                    <div class="kp-pulse-info">
+                        <span class="kp-pulse-title"><?= kp_e($rw['title'] ?? 'Unknown') ?></span>
+                        <span class="kp-pulse-sub"><?= kp_e($rwSub) ?></span>
+                        <div class="kp-pulse-bar"><span style="width: <?= $rwPct ?>%"></span></div>
+                    </div>
+                    <span class="kp-pulse-pct"><?= $rwPct ?>%</span>
+                </a>
+                <?php endforeach; ?>
+            </div>
+            <?php else: ?>
+            <p class="kp-up-empty"><i class="fa-solid fa-play"></i> Start watching anything — it will show up here.</p>
+            <?php endif; ?>
+            <div class="kp-pulse-label">Shortcuts</div>
+            <div class="kp-pulse-links">
+                <a href="./schedule.php"><i class="fas fa-calendar-days"></i> Schedule</a>
+                <a href="./profile.php?tab=watch-list"><i class="fas fa-heart"></i> Watchlist</a>
+                <a href="./profile.php?tab=notification"><i class="fas fa-bell"></i> Alerts</a>
+                <a href="./profile.php?tab=settings"><i class="fas fa-sliders"></i> Settings</a>
+            </div>
         </div>
-        <ul class="kp-wl-modal-list" id="kpWlList">
-            <li data-status="watching" onclick="saveCardWatchlist('watching')"><i class="fas fa-eye"></i> Watching</li>
-            <li data-status="watch_later" onclick="saveCardWatchlist('watch_later')"><i class="fas fa-bookmark"></i> Planning</li>
-            <li data-status="completed" onclick="saveCardWatchlist('completed')"><i class="fas fa-check-circle"></i> Completed</li>
-            <li data-status="on_hold" onclick="saveCardWatchlist('on_hold')"><i class="fas fa-pause-circle"></i> On Hold</li>
-            <li data-status="dropped" onclick="saveCardWatchlist('dropped')"><i class="fas fa-trash-can"></i> Dropped</li>
-        </ul>
-        <button type="button" class="kp-wl-modal-remove" id="kpWlRemove" onclick="removeCardWatchlist()" style="display:none;">
-            <i class="fas fa-trash-can"></i> Remove from List
-        </button>
     </div>
+
 </div>
-
-<script>
-(function() {
-    // Trend tabs and the genre browser live in assets/js/home-sections.js.
-
-    // Watchlist modal
-    let wlCardId = null;
-    let wlSaving = false;
-    const modal = document.getElementById('kpWlModal');
-    const list = document.getElementById('kpWlList');
-    const removeBtn = document.getElementById('kpWlRemove');
-
-    window.openCardWatchlist = async function(movieCard) {
-        if (wlSaving) return;
-        wlCardId = movieCard?.dataset?.id || null;
-        if (!wlCardId) return;
-        list.querySelectorAll('li').forEach(li => li.classList.remove('is-active'));
-        removeBtn.style.display = 'none';
-        modal.classList.add('is-open');
-        try {
-            const resp = await fetch('includes/check_watchlist.php?imdb_id=' + encodeURIComponent(wlCardId));
-            const data = await resp.json();
-            if (data.success && data.status) {
-                const active = list.querySelector('li[data-status="' + data.status + '"]');
-                if (active) active.classList.add('is-active');
-                removeBtn.style.display = 'block';
-            }
-        } catch(e) {}
-    };
-
-    window.closeCardWatchlist = function() {
-        modal.classList.remove('is-open');
-        wlCardId = null;
-    };
-
-    window.saveCardWatchlist = async function(status) {
-        if (!wlCardId || wlSaving) return;
-        const activeItem = list.querySelector('li.is-active');
-        if (activeItem && activeItem.dataset.status === status) { closeCardWatchlist(); return; }
-        wlSaving = true;
-        list.querySelectorAll('li').forEach(li => li.classList.toggle('is-active', li.dataset.status === status));
-        removeBtn.style.display = 'block';
-        const labels = {watching:'Watching',watch_later:'Planning',completed:'Completed',on_hold:'On Hold',dropped:'Dropped'};
-        try {
-            const resp = await fetch('includes/save_watchlist.php', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                body: 'imdb_id=' + encodeURIComponent(wlCardId) + '&status=' + encodeURIComponent(status)
-            });
-            const result = await resp.json();
-            if (result.success) {
-                if (typeof kpToast === 'function') kpToast(activeItem ? 'Updated to ' + labels[status] : 'Added to ' + labels[status], 'success');
-                setTimeout(() => { closeCardWatchlist(); wlSaving = false; }, 400);
-            } else {
-                if (typeof kpToast === 'function') kpToast('Failed to save', 'error');
-                list.querySelectorAll('li').forEach(li => li.classList.remove('is-active'));
-                wlSaving = false;
-            }
-        } catch(e) {
-            if (typeof kpToast === 'function') kpToast('Network error', 'error');
-            list.querySelectorAll('li').forEach(li => li.classList.remove('is-active'));
-            wlSaving = false;
-        }
-    };
-
-    window.removeCardWatchlist = async function() {
-        if (!wlCardId || wlSaving) return;
-        wlSaving = true;
-        try {
-            const resp = await fetch('includes/save_watchlist.php', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                body: 'imdb_id=' + encodeURIComponent(wlCardId) + '&action=remove'
-            });
-            const result = await resp.json();
-            if (result.success) {
-                if (typeof kpToast === 'function') kpToast('Removed from list', 'success');
-                list.querySelectorAll('li').forEach(li => li.classList.remove('is-active'));
-                removeBtn.style.display = 'none';
-                setTimeout(() => { closeCardWatchlist(); wlSaving = false; }, 400);
-            } else { if (typeof kpToast === 'function') kpToast('Failed to remove', 'error'); wlSaving = false; }
-        } catch(e) { if (typeof kpToast === 'function') kpToast('Network error', 'error'); wlSaving = false; }
-    };
-
-    modal?.addEventListener('click', function(e) { if (e.target === modal) closeCardWatchlist(); });
-    document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeCardWatchlist(); });
-})();
-</script>
 
 <?php include 'includes/footer.php'; ?>

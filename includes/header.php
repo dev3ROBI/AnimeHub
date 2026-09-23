@@ -168,7 +168,7 @@ if (!empty($_SESSION['userID'])) {
 }
 ?>
 
-<body class="<?= trim($kp_body_class) ?>">
+<body class="<?= trim($kp_body_class) ?>" data-user="<?= isset($_SESSION['userID']) ? '1' : '0' ?>">
     <!-- =================== Overlay =================== -->
     <div class="overlay" id="overlay"></div>
     <!-- =================== /Overlay =================== -->
@@ -272,16 +272,27 @@ if (!empty($_SESSION['userID'])) {
                     <div class="kp-search-head">
                         <div class="kp-search-input-wrap">
                             <i class="fas fa-search"></i>
-                            <input type="text" id="searchInput" placeholder="Search anime..." autocomplete="off" />
+                            <input type="text" id="searchInput" placeholder="Search anime, movies, TV…" autocomplete="off" />
                             <span class="clear-search" id="clearSearch">&times;</span>
                         </div>
                         <span class="kp-search-kbd">ESC</span>
+                    </div>
+                    <!-- Kind filter chips: All / Anime / Movies / TV -->
+                    <div class="kp-search-filters" id="searchFilters" role="tablist" aria-label="Search filter">
+                        <button type="button" class="kp-search-chip is-active" data-kind="all">All</button>
+                        <button type="button" class="kp-search-chip" data-kind="anime"><i class="fas fa-dragon"></i> Anime</button>
+                        <button type="button" class="kp-search-chip" data-kind="movie"><i class="fas fa-clapperboard"></i> Movies</button>
+                        <button type="button" class="kp-search-chip" data-kind="tv"><i class="fas fa-tv"></i> TV</button>
                     </div>
                     <div class="search-suggestions" id="searchSuggestions">
                         <div class="kp-sug-section">
                             <p><i class="fas fa-fire"></i> Trending: One Piece, Solo Leveling, Frieren</p>
                             <p><i class="fas fa-clock"></i> Try: Demon Slayer, Jujutsu Kaisen, Dandadan</p>
                         </div>
+                    </div>
+                    <div class="kp-search-foot">
+                        <span class="kp-search-hint"><i class="fas fa-arrow-up"></i><i class="fas fa-arrow-down"></i> navigate</span>
+                        <span class="kp-search-hint"><i class="fas fa-arrow-turn-up kp-rotate-90"></i> open</span>
                     </div>
                 </div>
             </div>
@@ -306,12 +317,21 @@ if (!empty($_SESSION['userID'])) {
                             </button>
                         </div>
                     </div>
+                    <!-- Type filter: All / Episodes / System -->
+                    <div class="kp-notif-tabs" id="notifTabs">
+                        <button type="button" class="kp-notif-tab is-active" data-type="">All</button>
+                        <button type="button" class="kp-notif-tab" data-type="episode"><i class="fas fa-clapperboard"></i> Episodes</button>
+                        <button type="button" class="kp-notif-tab" data-type="system"><i class="fas fa-medal"></i> System</button>
+                    </div>
                     <div id="notif-list" class="kp-notif-list">
                         <div class="kp-notif-empty">
                             <i class="fas fa-spinner fa-spin"></i>
                             <span>Loading...</span>
                         </div>
                     </div>
+                    <button type="button" id="notif-more" class="kp-notif-more" style="display:none;">
+                        Load more <i class="fas fa-chevron-down"></i>
+                    </button>
                 </div>
             </div>
 
@@ -550,7 +570,8 @@ if (!empty($_SESSION['userID'])) {
             bellIcon.addEventListener("click", (e) => {
                 togglePopup(notificationPopup, e);
                 if (!notificationPopup.classList.contains("active")) return;
-                loadNotifications();
+                notifPage = 1;
+                loadNotifications(false);
                 setTimeout(markAllRead, 600);
             });
 
@@ -592,16 +613,44 @@ if (!empty($_SESSION['userID'])) {
             });
 
             // ===================== SEARCH FUNCTIONALITY ===================== //
+            // Enhanced search: kind filters (anime/movie/TV), keyboard
+            // navigation, status badges and search history in one panel.
+            let searchKind = 'all';
+            let searchResults = [];   // last payload, for keyboard navigation
+            let searchActive = -1;    // highlighted row index
+            let searchAbort = null;
+            const defaultSuggestions = suggestionBox.innerHTML;
+
             searchInput.addEventListener("input", () => {
                 clearSearchBtn.style.display = searchInput.value.trim() ? "block" : "none";
             });
 
-            const defaultSuggestions = suggestionBox.innerHTML;
-
             function resetSuggestions() {
                 suggestionBox.classList.remove("kp-results");
+                searchResults = [];
+                searchActive = -1;
                 loadSearchHistory();
             }
+
+            /** Open the watch page for a result and remember the query. */
+            function openSearchResult(item, queryForHistory) {
+                if (queryForHistory) {
+                    fetch('./includes/save_search_history.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: 'term=' + encodeURIComponent(queryForHistory)
+                    });
+                }
+                hideAllPopups();
+                hideOverlay();
+                window.location.href = './watch.php?id=' + encodeURIComponent(item.imdb_id);
+            }
+
+            const KIND_META = {
+                anime: { label: 'Anime', icon: 'fa-solid fa-dragon' },
+                movie: { label: 'Movie', icon: 'fa-solid fa-clapperboard' },
+                tv:    { label: 'TV',    icon: 'fa-solid fa-tv' }
+            };
 
             function loadSearchHistory() {
                 fetch('./includes/get_search_history.php?limit=8')
@@ -611,25 +660,22 @@ if (!empty($_SESSION['userID'])) {
                             suggestionBox.innerHTML = defaultSuggestions;
                             return;
                         }
-                        suggestionBox.innerHTML = '<div class="kp-history-header"><i class="fas fa-clock-rotate-left"></i> Recent Searches <button id="clearAllHistory" style="background:none;border:none;color:#ff2e63;cursor:pointer;font-size:11px;float:right;">Clear all</button></div>';
+                        suggestionBox.innerHTML = '<div class="kp-history-header"><i class="fas fa-clock-rotate-left"></i> Recent Searches <button id="clearAllHistory" class="kp-history-clear">Clear all</button></div>';
                         data.forEach(item => {
                             const row = document.createElement('div');
                             row.className = 'kp-sug kp-history-item';
 
                             const icon = document.createElement('i');
                             icon.className = 'fas fa-clock';
-                            icon.style.cssText = 'color:#666; margin-right:10px; font-size:12px;';
 
                             const text = document.createElement('span');
+                            text.className = 'kp-history-term';
                             text.textContent = item.term;
-                            text.style.cssText = 'flex:1; color:#ccc; font-size:13px;';
 
                             const del = document.createElement('button');
                             del.className = 'kp-history-del';
                             del.innerHTML = '<i class="fas fa-xmark"></i>';
-                            del.style.cssText = 'background:none;border:none;color:#666;cursor:pointer;padding:2px 6px;font-size:12px;border-radius:4px;';
-                            del.addEventListener('mouseenter', function() { this.style.color='#ff6b6b'; this.style.background='rgba(255,107,107,0.1)'; });
-                            del.addEventListener('mouseleave', function() { this.style.color='#666'; this.style.background='none'; });
+                            del.title = 'Remove';
                             del.addEventListener('click', function(e) {
                                 e.stopPropagation();
                                 fetch('./includes/delete_search_history.php', {
@@ -645,7 +691,9 @@ if (!empty($_SESSION['userID'])) {
 
                             row.addEventListener('click', function() {
                                 searchInput.value = item.term;
+                                clearSearchBtn.style.display = 'block';
                                 searchInput.dispatchEvent(new Event('input'));
+                                searchInput.focus();
                             });
 
                             suggestionBox.appendChild(row);
@@ -682,6 +730,114 @@ if (!empty($_SESSION['userID'])) {
                 resetSuggestions();
             });
 
+            // Kind filter chips — switching re-runs the current query.
+            document.querySelectorAll('#searchFilters .kp-search-chip').forEach(chip => {
+                chip.addEventListener('click', () => {
+                    if (chip.dataset.kind === searchKind) return;
+                    document.querySelectorAll('#searchFilters .kp-search-chip').forEach(c => c.classList.remove('is-active'));
+                    chip.classList.add('is-active');
+                    searchKind = chip.dataset.kind;
+                    const q = searchInput.value.trim();
+                    if (q.length >= 2) runSearch(q);
+                });
+            });
+
+            function runSearch(query) {
+                clearTimeout(debounceTimeout);
+                if (searchAbort) searchAbort.abort();
+                searchAbort = new AbortController();
+                const signal = searchAbort.signal;
+                suggestionBox.classList.add("kp-results");
+                suggestionBox.innerHTML =
+                    '<p class="kp-sug-loading"><i class="fas fa-spinner fa-spin"></i> Searching…</p>';
+
+                const timer = setTimeout(() => searchAbort.abort(), 12000);
+
+                fetch(`./includes/search.php?term=${encodeURIComponent(query)}&kind=${encodeURIComponent(searchKind)}`, { signal })
+                    .then(res => res.json())
+                    .then(data => {
+                        clearTimeout(timer);
+                        suggestionBox.innerHTML = "";
+                        searchResults = Array.isArray(data) ? data : [];
+                        searchActive = -1;
+
+                        if (searchResults.length === 0) {
+                            suggestionBox.innerHTML =
+                                '<p class="kp-sug-empty"><i class="fas fa-ghost"></i> No ' +
+                                (searchKind === 'all' ? '' : KIND_META[searchKind].label.toLowerCase() + ' ') +
+                                'results for “' + query.replace(/</g, '&lt;') + '”</p>';
+                            return;
+                        }
+
+                        searchResults.forEach((item, idx) => {
+                            const row = document.createElement("div");
+                            row.className = "kp-sug";
+                            row.dataset.index = idx;
+
+                            const poster = document.createElement("img");
+                            poster.loading = "lazy";
+                            poster.alt = "";
+                            poster.src = item.poster || "./uploads/thumbnails/default.png";
+                            poster.addEventListener("error", () => {
+                                poster.src = "./uploads/thumbnails/default.png";
+                            });
+
+                            const text = document.createElement("div");
+                            text.className = "kp-sug-text";
+
+                            const title = document.createElement("div");
+                            title.className = "kp-sug-title";
+                            title.textContent = item.title;
+                            text.appendChild(title);
+
+                            const metaBits = [];
+                            if (item.year) metaBits.push(`<span>${item.year}</span>`);
+                            if (item.rating) {
+                                metaBits.push(`<span><i class="fas fa-star kp-star"></i> ${item.rating}</span>`);
+                            }
+                            if (item.episodes && item.episodes > 0) {
+                                metaBits.push(`<span>${item.episodes} EP</span>`);
+                            }
+                            if (metaBits.length) {
+                                const meta = document.createElement("div");
+                                meta.className = "kp-sug-meta";
+                                meta.innerHTML = metaBits.join("");
+                                text.appendChild(meta);
+                            }
+
+                            row.appendChild(poster);
+                            row.appendChild(text);
+
+                            // Status badge (Airing/Upcoming/Released).
+                            if (item.status) {
+                                const st = document.createElement('span');
+                                st.className = 'kp-sug-status kp-sug-status-' + item.status.toLowerCase();
+                                st.textContent = item.status;
+                                row.appendChild(st);
+                            }
+
+                            // Kind badge (Anime/Movie/TV) — provider goes to the title.
+                            const kindMeta = KIND_META[item.kind] || KIND_META.anime;
+                            const kind = document.createElement('span');
+                            kind.className = 'kp-sug-kind';
+                            kind.innerHTML = '<i class="' + kindMeta.icon + '"></i>' + kindMeta.label;
+                            row.appendChild(kind);
+
+                            row.addEventListener("click", () => {
+                                openSearchResult(item, query);
+                            });
+                            suggestionBox.appendChild(row);
+                        });
+                    })
+                    .catch(err => {
+                        clearTimeout(timer);
+                        if (err && (err.name === "AbortError" || signal.aborted)) return;
+                        console.error("Search error:", err);
+                        suggestionBox.innerHTML =
+                            '<p class="kp-sug-empty"><i class="fas fa-triangle-exclamation"></i> Error fetching results</p>';
+                    });
+            }
+
             searchInput.addEventListener("input", () => {
                 const query = searchInput.value.trim();
                 clearTimeout(debounceTimeout);
@@ -691,90 +847,39 @@ if (!empty($_SESSION['userID'])) {
                         resetSuggestions();
                         return;
                     }
-
-                    suggestionBox.classList.add("kp-results");
-                    suggestionBox.innerHTML =
-                        '<p class="kp-sug-loading"><i class="fas fa-spinner fa-spin"></i> Searching…</p>';
-
-                    const controller = new AbortController();
-                    const timer = setTimeout(() => controller.abort(), 12000);
-
-                    fetch(`./includes/search.php?term=${encodeURIComponent(query)}`, { signal: controller.signal })
-                        .then(res => res.json())
-                        .then(data => {
-                            clearTimeout(timer);
-                            suggestionBox.innerHTML = "";
-
-                            if (!Array.isArray(data) || data.length === 0) {
-                                suggestionBox.innerHTML =
-                                    '<p class="kp-sug-empty"><i class="fas fa-ghost"></i> No results found</p>';
-                                return;
-                            }
-
-                            data.forEach(item => {
-                                const row = document.createElement("div");
-                                row.className = "kp-sug";
-
-                                const poster = document.createElement("img");
-                                poster.loading = "lazy";
-                                poster.alt = "";
-                                poster.src = item.poster || "./uploads/thumbnails/default.png";
-                                poster.addEventListener("error", () => {
-                                    poster.src = "./uploads/thumbnails/default.png";
-                                });
-
-                                const text = document.createElement("div");
-                                text.className = "kp-sug-text";
-
-                                const title = document.createElement("div");
-                                title.className = "kp-sug-title";
-                                title.textContent = item.title;
-                                text.appendChild(title);
-
-                                const metaBits = [];
-                                if (item.year) metaBits.push(`<span>${item.year}</span>`);
-                                if (item.rating) {
-                                    metaBits.push(`<span><i class="fas fa-star kp-star"></i> ${item.rating}</span>`);
-                                }
-                                if (metaBits.length) {
-                                    const meta = document.createElement("div");
-                                    meta.className = "kp-sug-meta";
-                                    meta.innerHTML = metaBits.join("");
-                                    text.appendChild(meta);
-                                }
-
-                                row.appendChild(poster);
-                                row.appendChild(text);
-
-                                if (item.source && item.source !== "local") {
-                                    const prov = document.createElement("span");
-                                    prov.className = "kp-sug-prov";
-                                    prov.textContent = item.source;
-                                    row.appendChild(prov);
-                                }
-
-                                row.addEventListener("click", () => {
-                                    searchInput.value = item.title;
-                                    fetch('./includes/save_search_history.php', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                                        body: 'term=' + encodeURIComponent(item.title)
-                                    });
-                                    resetSuggestions();
-                                    hideAllPopups();
-                                    window.location.href = `watch.php?id=${encodeURIComponent(item.imdb_id)}`;
-                                });
-                                suggestionBox.appendChild(row);
-                            });
-                        })
-                        .catch(err => {
-                            clearTimeout(timer);
-                            if (err && err.name === "AbortError") return;
-                            console.error("Search error:", err);
-                            suggestionBox.innerHTML =
-                                '<p class="kp-sug-empty"><i class="fas fa-triangle-exclamation"></i> Error fetching results</p>';
-                        });
+                    runSearch(query);
                 }, 300);
+            });
+
+            // Enter opens the highlighted row (or the first); arrows move it.
+            searchInput.addEventListener("keydown", (e) => {
+                if (!searchResults.length) {
+                    if (e.key === 'Enter' && searchInput.value.trim().length >= 2) {
+                        e.preventDefault();
+                        const q = searchInput.value.trim();
+                        fetch('./includes/save_search_history.php', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                            body: 'term=' + encodeURIComponent(q)
+                        });
+                    }
+                    return;
+                }
+                const rows = suggestionBox.querySelectorAll('.kp-sug:not(.kp-history-item)');
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    searchActive = e.key === 'ArrowDown'
+                        ? (searchActive + 1) % searchResults.length
+                        : (searchActive - 1 + searchResults.length) % searchResults.length;
+                    rows.forEach((r, i) => r.classList.toggle('kp-active', i === searchActive));
+                    if (rows[searchActive]) rows[searchActive].scrollIntoView({ block: 'nearest' });
+                    return;
+                }
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const pick = searchResults[searchActive >= 0 ? searchActive : 0];
+                    if (pick) openSearchResult(pick, searchInput.value.trim());
+                }
             });
 
             searchInput.addEventListener("focus", () => {
@@ -827,12 +932,18 @@ if (!empty($_SESSION['userID'])) {
             }
 
             // ===================== NOTIFICATIONS ===================== //
+            // Feed is paged + type-filtered; polls keep the badge fresh while
+            // the panel is closed, and re-render only when it is open.
             const notifList = document.getElementById('notif-list');
             const notifBadge = document.getElementById('notif-badge');
             const notifCountLabel = document.getElementById('notif-count-label');
             const notifMarkAllBtn = document.getElementById('notif-mark-all');
             const notifClearAllBtn = document.getElementById('notif-clear-all');
+            const notifMoreBtn = document.getElementById('notif-more');
             let lastUnreadCount = 0;
+            let notifTypeFilter = '';
+            let notifPage = 1;
+            let notifPages = 1;
 
             // The two "notification behaviour" preferences from the Notification
             // tab. They were saved but never read, so both toggles did nothing.
@@ -889,11 +1000,80 @@ if (!empty($_SESSION['userID'])) {
                 return new Date(dateStr).toLocaleDateString();
             }
 
-            function loadNotifications() {
-                fetch('./includes/check_notifications.php')
+            function notifQuery(page) {
+                var qs = '?page=' + (page || 1) + '&limit=15';
+                if (notifTypeFilter) qs += '&type=' + encodeURIComponent(notifTypeFilter);
+                return './includes/check_notifications.php' + qs;
+            }
+
+            /** Build one feed row. Pulled out so paging can append rows. */
+            function notifRow(n) {
+                var row = document.createElement('div');
+                row.className = 'kp-notif-item';
+                row.setAttribute('data-id', n.id || '');
+                if (!n.is_read) row.classList.add('unread');
+
+                var icon = document.createElement('div');
+                icon.className = 'kp-notif-icon';
+                icon.innerHTML = '<i class="' + (n.icon || notifTypeIcon(n.type)) + '"></i>';
+
+                var body = document.createElement('div');
+                body.className = 'kp-notif-body';
+                var strong = document.createElement('strong');
+                strong.textContent = n.title;
+                var msg = document.createElement('span');
+                msg.textContent = n.message || ('Ep. ' + n.episode + ' is out!');
+                var time = document.createElement('div');
+                time.className = 'kp-notif-time';
+                time.textContent = timeAgo(n.time);
+
+                body.appendChild(strong);
+                body.appendChild(msg);
+                body.appendChild(time);
+
+                var delBtn = document.createElement('button');
+                delBtn.className = 'kp-notif-delete';
+                delBtn.innerHTML = '<i class="fas fa-xmark"></i>';
+                delBtn.title = 'Dismiss';
+                delBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    row.style.opacity = '0';
+                    row.style.transform = 'translateX(20px)';
+                    setTimeout(function() { row.remove(); }, 200);
+                    fetch('./includes/delete_notification.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id: n.id })
+                    });
+                });
+
+                row.appendChild(icon);
+                row.appendChild(body);
+                row.appendChild(delBtn);
+
+                row.addEventListener('click', function() {
+                    if (!n.is_read) {
+                        fetch('./includes/mark_notification_read.php', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ id: n.id })
+                        });
+                        row.classList.remove('unread');
+                    }
+                    // System notes (badges, rank, welcome) carry their own link.
+                    window.location.href = n.url || ('./watch.php?id=' + encodeURIComponent(n.slug) + '&ep=' + n.episode);
+                });
+
+                return row;
+            }
+
+            function loadNotifications(append) {
+                if (append) notifPage++;
+                fetch(notifQuery(notifPage))
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
                         var unread = data.unread || 0;
+                        notifPages = data.pages || 1;
 
                         if (notifBadge) {
                             if (unread > 0) {
@@ -935,77 +1115,28 @@ if (!empty($_SESSION['userID'])) {
 
                         if (!notifList) return;
                         var notifs = data.notifications || [];
-                        if (notifs.length === 0) {
-                            notifList.innerHTML = '<div class="kp-notif-empty"><i class="fas fa-bell-slash"></i><span>No notifications yet</span><span class="kp-notif-empty-sub">Follow anime to get notified about new episodes</span></div>';
+                        if (append) {
+                            notifs.forEach(function(n) { notifList.appendChild(notifRow(n)); });
+                        } else if (notifs.length === 0) {
+                            var emptyMsg = notifTypeFilter === 'episode'
+                                ? 'No episode alerts yet'
+                                : (notifTypeFilter === 'system' ? 'No system notifications' : 'No notifications yet');
+                            var emptySub = notifTypeFilter === 'system'
+                                ? 'Badges, rank-ups and welcome notes land here'
+                                : 'Follow anime to get notified about new episodes';
+                            notifList.innerHTML = '<div class="kp-notif-empty"><i class="fas fa-bell-slash"></i><span>' + emptyMsg + '</span><span class="kp-notif-empty-sub">' + emptySub + '</span></div>';
+                            lastUnreadCount = unread;
+                            updateNotifMore(false);
                             return;
+                        } else {
+                            notifList.innerHTML = '';
+                            notifs.forEach(function(n) { notifList.appendChild(notifRow(n)); });
                         }
 
-                        notifList.innerHTML = '';
-                        notifs.forEach(function(n) {
-                            var row = document.createElement('div');
-                            row.className = 'kp-notif-item';
-                            row.setAttribute('data-id', n.id || '');
-                            if (!n.is_read) row.classList.add('unread');
-
-                            var icon = document.createElement('div');
-                            icon.className = 'kp-notif-icon';
-                            icon.innerHTML = '<i class="' + (n.icon || notifTypeIcon(n.type)) + '"></i>';
-
-                            var body = document.createElement('div');
-                            body.className = 'kp-notif-body';
-                            var strong = document.createElement('strong');
-                            strong.textContent = n.title;
-                            var msg = document.createElement('span');
-                            msg.textContent = n.message || ('Ep. ' + n.episode + ' is out!');
-                            var time = document.createElement('div');
-                            time.className = 'kp-notif-time';
-                            time.textContent = timeAgo(n.time);
-
-                            body.appendChild(strong);
-                            body.appendChild(msg);
-                            body.appendChild(time);
-
-                            var delBtn = document.createElement('button');
-                            delBtn.className = 'kp-notif-delete';
-                            delBtn.innerHTML = '<i class="fas fa-xmark"></i>';
-                            delBtn.title = 'Dismiss';
-                            delBtn.addEventListener('click', function(e) {
-                                e.stopPropagation();
-                                row.style.opacity = '0';
-                                row.style.transform = 'translateX(20px)';
-                                setTimeout(function() { row.remove(); }, 200);
-                                fetch('./includes/delete_notification.php', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ id: n.id })
-                                });
-                            });
-
-                            row.appendChild(icon);
-                            row.appendChild(body);
-                            row.appendChild(delBtn);
-
-                            row.addEventListener('click', function() {
-                                if (!n.is_read) {
-                                    fetch('./includes/mark_notification_read.php', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ id: n.id })
-                                    });
-                                    row.classList.remove('unread');
-                                    unread--;
-                                    if (notifBadge && unread <= 0) notifBadge.style.display = 'none';
-                                    if (notifBadge && unread > 0) notifBadge.textContent = unread > 99 ? '99+' : unread;
-                                }
-                                // System notes (badges, rank, welcome) carry their own link.
-                                window.location.href = n.url || ('./watch.php?id=' + encodeURIComponent(n.slug) + '&ep=' + n.episode);
-                            });
-
-                            notifList.appendChild(row);
-                        });
+                        updateNotifMore(true);
 
                         // Show toast for new notifications
-                        if (unread > lastUnreadCount && lastUnreadCount > 0 && document.hidden) {
+                        if (!append && unread > lastUnreadCount && lastUnreadCount > 0 && document.hidden) {
                             var newest = notifs.find(function(n) { return !n.is_read; });
                             if (newest && notifPrefs.toast_enabled) showNotifToast(newest);
                             if (newest && notifPrefs.sound_enabled) kpNotifBeep();
@@ -1013,9 +1144,36 @@ if (!empty($_SESSION['userID'])) {
                         lastUnreadCount = unread;
                     })
                     .catch(function() {
-                        if (notifList) notifList.innerHTML = '<div class="kp-notif-empty"><i class="fas fa-triangle-exclamation"></i><span>Failed to load</span></div>';
+                        if (notifList && !append) notifList.innerHTML = '<div class="kp-notif-empty"><i class="fas fa-triangle-exclamation"></i><span>Failed to load</span></div>';
                     });
             }
+
+            function updateNotifMore(ok) {
+                if (!notifMoreBtn) return;
+                notifMoreBtn.style.display = (ok && notifPage < notifPages) ? 'block' : 'none';
+            }
+
+            if (notifMoreBtn) {
+                notifMoreBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    notifMoreBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading';
+                    loadNotifications(true);
+                    setTimeout(function() { notifMoreBtn.innerHTML = 'Load more <i class="fas fa-chevron-down"></i>'; }, 600);
+                });
+            }
+
+            // Type filter tabs — switching resets paging and re-fetches.
+            document.querySelectorAll('#notifTabs .kp-notif-tab').forEach(function(tab) {
+                tab.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    if (tab.dataset.type === notifTypeFilter) return;
+                    document.querySelectorAll('#notifTabs .kp-notif-tab').forEach(function(t) { t.classList.remove('is-active'); });
+                    tab.classList.add('is-active');
+                    notifTypeFilter = tab.dataset.type;
+                    notifPage = 1;
+                    loadNotifications(false);
+                });
+            });
 
             function markAllRead() {
                 fetch('./includes/mark_notifications_read.php', { method: 'POST' })
@@ -1057,7 +1215,8 @@ if (!empty($_SESSION['userID'])) {
                     }).then(function() {
                         if (typeof kpToast === 'function') kpToast('Notifications cleared', 'success');
                     }).catch(function() {
-                        loadNotifications();
+                        notifPage = 1;
+                        loadNotifications(false);
                     });
                 });
             }
@@ -1084,8 +1243,12 @@ if (!empty($_SESSION['userID'])) {
                 }, 5000);
             }
 
-            loadNotifications();
-            setInterval(loadNotifications, 60000);
+            // Initial feed pull + badge refresh every minute while the panel
+            // is closed. Open panels re-render on demand only.
+            loadNotifications(false);
+            setInterval(function () {
+                if (!notificationPopup.classList.contains('active')) loadNotifications(false);
+            }, 60000);
 
     </script>
     <!-- =================== /Script =================== -->

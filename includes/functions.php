@@ -250,8 +250,38 @@ function render_trend_item(array $item, $rank) {
 
     $scoreHtml = $score ? '<span class="kp-trend-score"><i class="fas fa-star"></i> ' . kp_e($score) . '</span>' : '';
 
+    // Air-status pill — pulsing dot for airing, hourglass for upcoming,
+    // quiet check for finished. Unknown stays silent instead of lying.
+    $stRaw = strtoupper((string)($item['status'] ?? ''));
+    if (in_array($stRaw, ['RELEASING', 'AIRING'], true)) {
+        $statusHtml = '<span class="kp-trend-status is-airing"><i class="fas fa-circle-play"></i> Airing</span>';
+    } elseif (in_array($stRaw, ['NOT_YET_RELEASED', 'UPCOMING'], true)) {
+        $statusHtml = '<span class="kp-trend-status is-upcoming"><i class="fas fa-hourglass-half"></i> Upcoming</span>';
+    } elseif ($stRaw !== '') {
+        $statusHtml = '<span class="kp-trend-status"><i class="fas fa-check"></i> Released</span>';
+    } else {
+        $statusHtml = '';
+    }
+
+    // Next-episode strip — only when a future air time is actually known, so
+    // "EP 5 · 2d 4h" is always a promise the schedule keeps.
+    $naTs = (int)($item['next_airing']['airingAt'] ?? 0);
+    $naEp = (int)($item['next_airing']['episode'] ?? 0);
+    $nextEpHtml = '';
+    if ($naTs > time() && $naEp > 0) {
+        $diff  = $naTs - time();
+        $days  = (int)floor($diff / 86400);
+        $hours = (int)floor(($diff % 86400) / 3600);
+        $inTxt = $days > 0 ? $days . 'd ' . $hours . 'h'
+               : ($hours > 0 ? $hours . 'h' : max(1, (int)floor($diff / 60)) . 'm');
+        $nextEpHtml = '<span class="kp-trend-next"><i class="fas fa-tower-broadcast"></i> EP ' . $naEp . ' · ' . $inTxt . '</span>';
+    }
+
+    // Top-3 rows get medal treatment on the rank.
+    $podium = $rank > 0 && $rank <= 3 ? ' is-top' : '';
+
     return <<<HTML
-    <a href="{$link}" class="kp-trend-item">
+    <a href="{$link}" class="kp-trend-item{$podium}">
         <div class="kp-trend-bg"><img src="{$bannerEsc}" alt=""{$bannerAttrs}></div>
         <div class="kp-trend-overlay"></div>
         <span class="kp-trend-rank">{$rank}</span>
@@ -260,11 +290,13 @@ function render_trend_item(array $item, $rank) {
             <div class="kp-trend-meta">
                 {$scoreHtml}
                 <span class="kp-trend-format">{$format}</span>
+                {$statusHtml}
             </div>
             <div class="kp-trend-eps">
                 <span><i class="fas fa-closed-captioning"></i> {$sub}</span>
                 <span><i class="fas fa-microphone"></i> {$dub}</span>
                 <span><i class="fas fa-layer-group"></i> {$total}</span>
+                {$nextEpHtml}
             </div>
         </div>
         <div class="kp-trend-play"><i class="fas fa-play"></i></div>
@@ -303,6 +335,37 @@ function kp_preview_payload(array $item, $link, array $opts = []) {
         'g'     => array_values(array_map('strval', $genres)),
         'x'     => mb_strlen($desc) > 220 ? mb_substr($desc, 0, 220) . '…' : $desc,
     ];
+
+    /*
+     * Accurate availability for the hover card:
+     *   ct  content type ('movie' | 'tv') for Movie/TV badges
+     *   na  next airing { episode, ts } unix — the "Episode N in 2d 4h" line
+     * The aired count stays what is actually OUT so "12 EP" never promises
+     * an episode that has not aired yet.
+     */
+    $contentType = (string)($item['content_type'] ?? '');
+    if ($contentType !== '') $payload['ct'] = $contentType;
+    // TMDB list rows carry no reliable status (tvq=1): the hover card shows a
+    // neutral badge and resolves the real status from the detail endpoint on
+    // first hover instead of guessing "Released" for a show that is airing.
+    if (!empty($item['tvq'])) $payload['tvq'] = 1;
+    $airedOut = (int)($item['aired_episodes'] ?? 0);
+    if ($airedOut > 0) $payload['ae'] = $airedOut;
+    // TMDB TV: `episodes` holds the season count and `total_episodes` the
+    // series-wide episode total — pass the total so the hover card can show
+    // “38S · 1179 EP” instead of a meaningless “38 EP”.
+    if ($contentType === 'tv' && !empty($item['total_episodes']) && is_numeric($item['total_episodes'])) {
+        $payload['ae'] = (int)$item['total_episodes'];
+    }
+    if (!empty($item['next_airing']['airingAt'])) {
+        $nextTs = (int)$item['next_airing']['airingAt'];
+        if ($nextTs > time()) {
+            $payload['na'] = [
+                'e'  => (int)($item['next_airing']['episode'] ?? 0),
+                'ts' => $nextTs,
+            ];
+        }
+    }
 
     // An episode row (schedule / continue watching) should link to that episode.
     if (!empty($opts['preview_episode'])) {
@@ -492,4 +555,90 @@ function render_notice($html, $icon = 'fa-solid fa-circle-info') {
     return '<div class="show-container" style="margin-bottom:20px;">'
          . '<div class="head-show"><i class="' . kp_e($icon) . '"></i><p>' . $html . '</p></div>'
          . '</div>';
+}
+
+/**
+ * Sidebar "Upcoming" rows grouped by arrival day.
+ *
+ *   today  → air time is later today (or already out within the last 12h)
+ *   next   → tomorrow, up to 7 days out
+ *   later  → beyond a week (or undated: premiere-pending titles)
+ *
+ * Every group is sorted by air time (undated last), so the list reads as a
+ * mini schedule instead of a popularity dump.
+ */
+function kp_group_upcoming(array $items, $now = null) {
+    $now = $now ?: time();
+    $startOfDay = (int)strtotime('today', $now);
+    $groups = ['today' => [], 'next' => [], 'later' => []];
+    $seen = [];
+    foreach ($items as $item) {
+        if (!is_array($item) || empty($item['id']) || isset($seen[$item['id']])) continue;
+        $seen[$item['id']] = true;
+        $ts = (int)($item['next_airing']['airingAt'] ?? 0);
+        if ($ts >= $startOfDay && $ts < $startOfDay + 86400 + 43200) {
+            // Later today (grace window covers episodes that just aired).
+            $groups['today'][] = $item + ['_ts' => $ts];
+        } elseif ($ts >= $startOfDay + 86400 && $ts < $startOfDay + 8 * 86400) {
+            $groups['next'][] = $item + ['_ts' => $ts];
+        } else {
+            // Beyond a week, in the past, or no schedule at all.
+            $groups['later'][] = $item + ['_ts' => $ts];
+        }
+    }
+    foreach ($groups as $key => $rows) {
+        usort($rows, fn($a, $b) => ($a['_ts'] ?: PHP_INT_MAX) <=> ($b['_ts'] ?: PHP_INT_MAX));
+        $groups[$key] = $rows;
+    }
+    return $groups;
+}
+
+/**
+ * One row of the sidebar Upcoming list — mirrors the old inline markup but
+ * reads the enriched fields (episode number, countdown chip) too.
+ */
+function render_upcoming_item(array $item) {
+    if (!is_array($item) || empty($item['id'])) return '';
+
+    $title    = kp_e($item['title'] ?? 'Unknown');
+    $poster   = $item['poster'] ?: './uploads/thumbnails/default.png';
+    $format   = $item['format'] ?: ($item['type'] ?? 'TV');
+    $meta     = $item['year'] ?: ($item['status'] ?? 'TBA');
+    $airTs    = (int)($item['next_airing']['airingAt'] ?? 0);
+    $airEp    = (int)($item['next_airing']['episode'] ?? 0);
+
+    // Arrival line: "EP 4 · Fri, 25 Sep" when scheduled, else the premiere
+    // date for not-yet-released titles.
+    $airTxt = '';
+    if ($airTs > 0) {
+        $airTxt = ($airEp > 0 ? 'EP ' . $airEp . ' · ' : '') . date('D, d M', $airTs);
+    } elseif (($item['status'] ?? '') === 'NOT_YET_RELEASED' && !empty($item['aired']) && $item['aired'] !== 'N/A') {
+        $airTxt = 'Premieres ' . $item['aired'];
+    }
+
+    $epTotal = (int)(($item['episodes'] ?? 0) ?: ($item['aired_episodes'] ?? 0));
+    $epHtml  = $epTotal > 0 ? '<span><i class="fas fa-layer-group"></i> ' . $epTotal . '</span>' : '';
+
+    $link    = kp_e(kp_watch_url($item));
+    $airHtml = '';
+    if ($airTxt !== '') {
+        $airHtml = '<div class="kp-side-air"><i class="fas fa-clock"></i><span>' . kp_e($airTxt) . '</span>'
+                 . ($airTs > 0 ? kp_countdown_chip($airTs) : '') . '</div>';
+    }
+
+    return <<<HTML
+    <a class="kp-side-item" href="{$link}">
+        <img class="kp-side-thumb" src="{$poster}" alt="" loading="lazy" onerror="this.onerror=null;this.src='./uploads/thumbnails/default.png';">
+        <div class="kp-side-info">
+            <span class="kp-side-title">{$title}</span>
+            <div class="kp-side-meta">
+                <span class="kp-side-badge">{$format}</span>
+                <span>{$meta}</span>
+                {$epHtml}
+            </div>
+            {$airHtml}
+        </div>
+        <i class="fas fa-chevron-right kp-side-go"></i>
+    </a>
+    HTML;
 }

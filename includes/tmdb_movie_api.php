@@ -55,6 +55,118 @@ function tmdb_tv_genre_list(): array {
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
+/**
+ * Real availability for TMDB rows.
+ *
+ * TMDB's own `status` strings ("Returning Series", "Canceled", …) do not map
+ * onto the AniList vocabulary the UI badges read, and list endpoints don't
+ * even include `status` — so upcoming titles used to render as plain
+ * "Released" with the first not-yet-aired episode countable as out. This
+ * derives the display status from the actual air dates instead:
+ *   - next_episode_to_air in the future                → Upcoming / Airing
+ *   - first_air_date in the future (premiere pending)  → Upcoming
+ *   - last_episode_to_air exists, nothing upcoming     → Released
+ *   - TMDB status Canceled/Ended wins for finished shows
+ */
+function tmdb_apply_availability(array &$item, array $m) {
+    $now = time();
+
+    $nextTs = 0;
+    if (!empty($m['next_episode_to_air']['air_date'])) {
+        $t = strtotime((string)$m['next_episode_to_air']['air_date'] . ' 00:00:00');
+        if ($t !== false) $nextTs = $t;
+    }
+
+    $firstTs = 0;
+    if (!empty($m['first_air_date'])) {
+        $t = strtotime((string)$m['first_air_date'] . ' 00:00:00');
+        if ($t !== false) $firstTs = $t;
+    }
+
+    if ($nextTs > $now) {
+        // Episodes are still scheduled: premieres pending count as Upcoming.
+        $hasOut = !empty($m['last_episode_to_air']['air_date'])
+            && strtotime((string)$m['last_episode_to_air']['air_date'] . ' 00:00:00') <= $now;
+        $item['status'] = $hasOut ? 'RELEASING' : 'NOT_YET_RELEASED';
+    } elseif ($firstTs > $now) {
+        $item['status'] = 'NOT_YET_RELEASED';
+    } else {
+        $tmdbStatus = strtoupper((string)($m['status'] ?? ''));
+        if ($tmdbStatus === 'CANCELED' || $tmdbStatus === 'CANCELLED' || $tmdbStatus === 'ENDED') {
+            $item['status'] = 'FINISHED';
+        } elseif ($tmdbStatus === 'RETURNING SERIES' || $tmdbStatus === 'IN PRODUCTION') {
+            $item['status'] = 'RELEASING';
+        } elseif ($tmdbStatus === 'PILOT' || $tmdbStatus === 'IN DEVELOPMENT') {
+            $item['status'] = 'NOT_YET_RELEASED';
+        } elseif ($tmdbStatus === 'PLANNED' || $tmdbStatus === '') {
+            // List endpoints omit `status` entirely and only carry first_air_date,
+            // so nothing here is trustworthy: mark the row as "status unknown"
+            // (tvq=1) instead of guessing FINISHED — a currently-airing show
+            // must not render as "Released". The hover card resolves the real
+            // status from the (cached) detail endpoint on demand.
+            $item['status'] = '';
+            $item['tvq'] = 1;
+        } else {
+            $item['status'] = $firstTs > 0 ? 'FINISHED' : '';
+        }
+    }
+
+    // Next airing drives the hover card's "Episode N in 2d 4h" countdown.
+    if ($nextTs > $now) {
+        $item['next_airing'] = [
+            'airingAt' => $nextTs,
+            'episode'  => (int)($m['next_episode_to_air']['episode_number'] ?? 0),
+        ];
+    } else {
+        $item['next_airing'] = null;
+    }
+
+    // Episodes actually OUT — never count a not-yet-aired episode.
+    $lastEp = 0;
+    $lastSeason = 0;
+    if (!empty($m['last_episode_to_air']['air_date'])
+        && strtotime((string)$m['last_episode_to_air']['air_date'] . ' 00:00:00') <= $now) {
+        $lastEp = (int)($m['last_episode_to_air']['episode_number'] ?? 0);
+        $lastSeason = (int)($m['last_episode_to_air']['season_number'] ?? 0);
+    }
+
+    if (!empty($item['content_type']) && $item['content_type'] === 'tv') {
+        // Series-wide total only counts seasons up to the one last aired; a
+        // future season's announced episodes must not inflate the count.
+        $outTotal = 0;
+        foreach (($m['seasons'] ?? []) as $s) {
+            $sNum = (int)($s['season_number'] ?? 0);
+            if ($sNum <= 0) continue;
+            if ($lastSeason > 0 && $sNum > $lastSeason) continue;
+            $outTotal += (int)($s['episode_count'] ?? 0);
+        }
+        if ($outTotal > 0) {
+            $item['aired_episodes'] = $outTotal;
+        } elseif (isset($m['seasons'])) {
+            // Full row whose seasons carry no episode counts yet.
+            $item['aired_episodes'] = $lastEp;
+        } elseif ($nextTs > $now) {
+            // List row without `seasons` (recommendations etc.): nothing is
+            // confirmed out, so keep the count at zero instead of trusting
+            // number_of_episodes (which includes unaired seasons).
+            $item['aired_episodes'] = 0;
+        } elseif (!empty($item['tvq'])) {
+            // Status unknown AND nothing scheduled — the episode count from a
+            // bare list row is a guess; hide it until the detail lookup lands.
+            $item['aired_episodes'] = 0;
+        }
+        // else: keep the raw number_of_episodes the normalizer already set.
+    } else {
+        // Movies: out when the release date has passed.
+        $release = (string)($m['release_date'] ?? '');
+        if ($release !== '') {
+            $t = strtotime($release . ' 00:00:00');
+            $item['status'] = ($t !== false && $t <= $now) ? 'RELEASED' : 'UPCOMING';
+        }
+        $item['aired_episodes'] = ($item['status'] ?? '') === 'RELEASED' ? 1 : 0;
+    }
+}
+
 /** Normalize a TMDB movie result into the catalog item shape. */
 function tmdb_movie_normalize($m) {
     if (!is_array($m)) return null;
@@ -66,7 +178,7 @@ function tmdb_movie_normalize($m) {
     $banner = !empty($m['backdrop_path']) ? TMDB_IMAGE_BASE . $m['backdrop_path'] : '';
     $year = !empty($m['release_date']) ? (int)substr($m['release_date'], 0, 4) : null;
 
-    return [
+    $item = [
         'id'              => 'tmdb:movie:' . $id,
         'provider'        => 'tmdb',
         'provider_id'     => (string)$id,
@@ -82,7 +194,7 @@ function tmdb_movie_normalize($m) {
         'description'     => $m['overview'] ?? '',
         'type'            => 'Movie',
         'format'          => 'Movie',
-        'status'          => $m['release_date'] ?? '' < date('Y-m-d') ? 'Released' : 'Upcoming',
+        'status'          => '',   // derived by tmdb_apply_availability()
         'episodes'        => 1,
         'aired_episodes'  => 1,
         'episode'         => 1,
@@ -110,6 +222,9 @@ function tmdb_movie_normalize($m) {
         'has_dub'         => false,
         'content_type'    => 'movie',
     ];
+
+    tmdb_apply_availability($item, $m);
+    return $item;
 }
 
 /** Normalize a TMDB TV result into the catalog item shape. */
@@ -134,7 +249,7 @@ function tmdb_tv_normalize($m) {
     $origin = $m['origin_country'] ?? [];
     $lang = !empty($origin) ? $origin[0] : ($m['original_language'] ?? '');
 
-    return [
+    $item = [
         'id'              => 'tmdb:tv:' . $id,
         'provider'        => 'tmdb',
         'provider_id'     => (string)$id,
@@ -150,7 +265,7 @@ function tmdb_tv_normalize($m) {
         'description'     => $m['overview'] ?? '',
         'type'            => 'TV',
         'format'          => 'TV',
-        'status'          => $m['status'] ?? '',
+        'status'          => '',   // derived by tmdb_apply_availability()
         'episodes'        => $m['number_of_seasons'] ?? 0,
         'aired_episodes'  => $m['number_of_episodes'] ?? 0,
         'episode'         => null,
@@ -182,6 +297,9 @@ function tmdb_tv_normalize($m) {
         'total_episodes'  => $m['number_of_episodes'] ?? 0,
         'networks'        => array_map(function($n) { return $n['name'] ?? ''; }, $m['networks'] ?? []),
     ];
+
+    tmdb_apply_availability($item, $m);
+    return $item;
 }
 
 // ─── Movie endpoints ──────────────────────────────────────────────────
@@ -283,7 +401,8 @@ function tmdb_movie_detail($id) {
     $id = (int)$id;
     if ($id <= 0) return null;
 
-    $key = api_cache_key('tmdb_movie', ['detail:v2', $id]);
+    // v3: payload gained the derived availability (status RELEASED/UPCOMING).
+    $key = api_cache_key('tmdb_movie', ['detail:v3', $id]);
     $hit = api_cache_get($key);
     if (is_array($hit)) return $hit;
 
@@ -530,8 +649,9 @@ function tmdb_tv_detail($id) {
     // v3: the cached payload gained last_episode_to_air (the notification check
     // reads it). v4: the placeholder episode titles became '' — the S/E label is
     // built by the UI, and a placeholder title printed as a junk "· S1 E1"
-    // suffix once the real season data started overriding it.
-    $key = api_cache_key('tmdb_tv', ['detail:v4', $id]);
+    // suffix once the real season data started overriding it. v5: payloads
+    // gained the derived availability (status RELEASING/…, next_airing, tvq).
+    $key = api_cache_key('tmdb_tv', ['detail:v5', $id]);
     $hit = api_cache_get($key);
     if (is_array($hit)) return $hit;
 

@@ -66,6 +66,17 @@
         </div>
     </div>
 </footer>
+
+<?php
+/*
+ * Card watchlist modal — one shared copy for every page (footer is on all of
+ * them), so the `+` button on any card anywhere can open it.
+ */
+if (!isset($kp_watchlist_modal_done)) {
+    $kp_watchlist_modal_done = true;
+    include __DIR__ . '/watchlist_modal.php';
+}
+?>
     <!-- Footer styles live in assets/css/nav_style.css (see "Site footer"):
          a <style> block down here forced a second style recalculation on
          every page. -->

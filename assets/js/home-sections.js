@@ -64,6 +64,22 @@
         });
     }
 
+    // ─── Upcoming sidebar tabs (TODAY / NEXT / LATER) ──────────────
+    // Groups are all server-rendered; switching is a pure class toggle, so
+    // this works with zero network cost and degrades to stacked lists
+    // without JS.
+    const upTabs = document.getElementById('upTabs');
+    if (upTabs) {
+        const panes = Array.from(document.querySelectorAll('.kp-up-pane'));
+        upTabs.addEventListener('click', (event) => {
+            const tab = event.target.closest('.kp-trend-tab[data-up]');
+            if (!tab) return;
+            const key = tab.dataset.up;
+            upTabs.querySelectorAll('.kp-trend-tab').forEach((t) => t.classList.toggle('active', t === tab));
+            panes.forEach((pane) => pane.classList.toggle('active', pane.dataset.upPane === key));
+        });
+    }
+
     // ─── Genre browser ──────────────────────────────────────────────
     const browse = document.getElementById('kpGenreBrowse');
     if (!browse) return;

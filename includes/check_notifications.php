@@ -175,12 +175,15 @@ try {
 } catch (Exception $e) {}
 
 // 2. Followed titles (an explicit opt-in, so they answer to Follow alerts).
+//    Any provider slug is accepted: anime follows use "anilist:N" and TMDB
+//    TV follows use "tmdb:tv:N" — that is what lets a TV follow produce
+//    episode alerts even when the user never played an episode.
 try {
     $fstmt = $pdo->prepare("SELECT anime_slug, anime_title FROM follows WHERE user_id = ?");
     $fstmt->execute([$user_id]);
     foreach ($fstmt->fetchAll(PDO::FETCH_ASSOC) as $f) {
         $slug = (string)($f['anime_slug'] ?? '');
-        if (!preg_match('/^anilist:\d+$/', $slug)) continue;
+        if (!preg_match('/^anilist:\d+$/', $slug) && !preg_match('/^tmdb:tv:\d+$/', $slug)) continue;
         $track($slug, 'follow', 0, (string)($f['anime_title'] ?? ''));
     }
 } catch (Exception $e) {}
@@ -194,7 +197,7 @@ try {
         $slug = (string)($row['imdb_id'] ?? '');
         if ($slug === '') continue;
         if (!preg_match('/^anilist:\d+$/', $slug) && !progress_is_tv_slug($slug)) continue;
-        $track($slug, 'episode', 0, '', (int)(strtotime((string)($row['updated_at'] ?? '')) ?: 0));
+        $track($slug, 'follow', 0, '', (int)(strtotime((string)($row['updated_at'] ?? '')) ?: 0));
     }
 } catch (Exception $e) {}
 
@@ -304,6 +307,15 @@ if (!empty($tvTracked) && $sweepDue('kp_tv_sweep_at', 300)) {
             $detail = null;
         }
         if (!is_array($detail)) continue;
+
+        // Remember the title so later sweeps (and the feed rows) show a name
+        // even when the follow row was saved without one.
+        if ($info['title'] === '' && !empty($detail['title'])) {
+            try {
+                $pdo->prepare("UPDATE follows SET anime_title = ? WHERE user_id = ? AND anime_slug = ?")
+                    ->execute([(string)$detail['title'], $user_id, $info['slug']]);
+            } catch (Exception $e) {}
+        }
 
         // TMDB reports the newest episode it knows about; anything with a
         // future air date is not out yet and must not be announced.

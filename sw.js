@@ -18,7 +18,7 @@
  *   APIs (.php)  → network-first, exact-URL cache fallback when offline
  *   media/video  → not intercepted at all (no range/HLS corruption)
  */
-const VERSION = 'v5'; // v5: exact-URL asset caching (no stale CSS/JS under a new ?v=)
+const VERSION = 'v9'; // v9: premium trending ranks, Upcoming day tabs, My Pulse panel
 const SHELL_CACHE = 'kp-shell-' + VERSION;
 const RUNTIME_CACHE = 'kp-runtime-' + VERSION;
 const OFFLINE_URL = './assets/pwa/offline.html';
