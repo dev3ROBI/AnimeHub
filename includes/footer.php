@@ -91,7 +91,7 @@ if (!isset($kp_watchlist_modal_done)) {
     <link rel="stylesheet" id="kp-css-install-prompt" data-kp-lazy="1"
           href="<?= htmlspecialchars(kp_asset('css', 'assets/pwa/install-prompt.css'), ENT_QUOTES, 'UTF-8') ?>"
           media="print" onload="this.media='all';this.setAttribute('data-kp-ready','1')"
-          onerror="window.kpCssRetry&amp;&amp;window.kpCssRetry(this)">
+          onerror="window.kpCssRetry && window.kpCssRetry(this)">
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function () {
