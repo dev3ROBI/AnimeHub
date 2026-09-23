@@ -80,20 +80,28 @@ foreach (array_merge($popular, $trending) as $item) {
     $newOnSite[] = $item;
 }
 
-// Upcoming (items with 0 aired episodes)
+// Upcoming — dedicated NOT_YET_RELEASED fetch first (popular/trending lists
+// rarely contain unreleased titles, which left this sidebar empty), then any
+// airing-with-future-ep items from those lists as filler.
 $upcoming = [];
-foreach ($popular as $item) {
-    $aired = $item['aired_episodes'] ?? 0;
-    if (!$aired || $aired <= 0) {
-        $upcoming[] = $item;
-    }
+if (function_exists('anilist_upcoming_media')) {
+    $upcoming = anilist_upcoming_media(12);
 }
-if (empty($upcoming)) {
-    foreach ($trending as $item) {
-        $aired = $item['aired_episodes'] ?? 0;
-        if (!$aired || $aired <= 0) {
-            $upcoming[] = $item;
-        }
+$seenUp = [];
+foreach ($upcoming as $upIt) {
+    if (!empty($upIt['id'])) $seenUp[$upIt['id']] = true;
+}
+foreach (array_merge($popular, $trending) as $item) {
+    if (count($upcoming) >= 12) break;
+    $id = $item['id'] ?? null;
+    if (empty($id) || isset($seenUp[$id])) continue;
+    $aired = $item['aired_episodes'] ?? 0;
+    $isUp = (!$aired || $aired <= 0)
+        || ($item['status'] ?? '') === 'NOT_YET_RELEASED'
+        || (int)($item['next_airing']['airingAt'] ?? 0) > time();
+    if ($isUp) {
+        $seenUp[$id] = true;
+        $upcoming[] = $item;
     }
 }
 
@@ -405,6 +413,15 @@ $quickStats = [
                     $upPoster = $item['poster'] ?: './uploads/thumbnails/default.png';
                     $upFormat = $item['format'] ?: ($item['type'] ?? 'TV');
                     $upMeta   = $item['year'] ?: ($item['status'] ?? 'TBA');
+                    // Arrival: exact air time when AniList schedules it, else the
+                    // known start date for not-yet-released titles.
+                    $upAirTs  = (int)($item['next_airing']['airingAt'] ?? 0);
+                    $upAirTxt = '';
+                    if ($upAirTs > 0) {
+                        $upAirTxt = 'Arrives ' . date('D, d M', $upAirTs);
+                    } elseif (($item['status'] ?? '') === 'NOT_YET_RELEASED' && !empty($item['aired']) && $item['aired'] !== 'N/A') {
+                        $upAirTxt = 'Premieres ' . $item['aired'];
+                    }
                     ?>
                     <a class="kp-side-item" href="<?= kp_e(kp_watch_url($item)) ?>">
                         <img class="kp-side-thumb" src="<?= kp_e($upPoster) ?>" alt=""<?= kp_img_attrs($upPoster, ['sizes' => '72px']) ?> onerror="this.onerror=null;this.src='./uploads/thumbnails/default.png';">
@@ -414,6 +431,13 @@ $quickStats = [
                                 <span class="kp-side-badge"><?= kp_e($upFormat) ?></span>
                                 <span><?= kp_e($upMeta) ?></span>
                             </div>
+                            <?php if ($upAirTxt !== ''): ?>
+                                <div class="kp-side-air">
+                                    <i class="fas fa-clock"></i>
+                                    <span><?= kp_e($upAirTxt) ?></span>
+                                    <?= $upAirTs > 0 ? kp_countdown_chip($upAirTs) : '' ?>
+                                </div>
+                            <?php endif; ?>
                         </div>
                         <i class="fas fa-chevron-right kp-side-go"></i>
                     </a>

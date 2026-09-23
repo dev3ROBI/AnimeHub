@@ -13,7 +13,7 @@
  *   APIs (.php)  → network-first, exact-URL cache fallback when offline
  *   media/video  → not intercepted at all (no range/HLS corruption)
  */
-const VERSION = 'v1';
+const VERSION = 'v2'; // v2: +countdown.js, aired-episode semantics fix
 const SHELL_CACHE = 'kp-shell-' + VERSION;
 const RUNTIME_CACHE = 'kp-runtime-' + VERSION;
 const OFFLINE_URL = './assets/pwa/offline.html';
@@ -32,6 +32,7 @@ const PRECACHE_URLS = [
   './assets/js/card-preview.min.js',
   './assets/js/home-sections.min.js',
   './assets/js/genre-scroll.min.js',
+  './assets/js/countdown.min.js',
   './assets/fonts/poppins-400.woff2',
   './assets/fonts/poppins-600.woff2',
   './assets/fonts/firacode-400.woff2',

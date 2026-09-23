@@ -21,6 +21,43 @@ if (!function_exists('kp_e')) {
 }
 
 /**
+ * Humanized time remaining — MUST stay in step with fmt() in
+ * assets/js/countdown.js (PHP paints the first frame, JS ticks from there).
+ */
+if (!function_exists('kp_time_left')) {
+    function kp_time_left($ts) {
+        $diff = (int)$ts - time();
+        if ($diff <= 0) return 'Airing now';
+        $d = intdiv($diff, 86400);
+        $h = intdiv($diff % 86400, 3600);
+        $m = intdiv($diff % 3600, 60);
+        if ($d >= 1) return $d . 'd ' . $h . 'h';
+        if ($h >= 1) return $h . 'h ' . $m . 'm';
+        if ($m >= 1) return $m . 'm';
+        return $diff . 's';
+    }
+}
+
+/**
+ * Countdown chip markup for a unix release timestamp. Pairs with
+ * assets/js/countdown.js (loaded in header.php): JS ticks every second while
+ * any chip is pending and fires a one-shot `kp:released` CustomEvent at zero.
+ * Returns '' for ts <= 0.
+ */
+if (!function_exists('kp_countdown_chip')) {
+    function kp_countdown_chip($ts) {
+        $ts = (int)$ts;
+        if ($ts <= 0) return '';
+        $live = $ts <= time();
+        return '<span class="kp-cd' . ($live ? ' is-live' : '') . '"'
+             . ' data-release="' . $ts . '"'
+             . ' data-done-text="Airing now"'
+             . ($live ? ' data-done="1"' : '')
+             . '>' . kp_e($live ? 'Airing now' : kp_time_left($ts)) . '</span>';
+    }
+}
+
+/**
  * Load user settings from the database.
  * Returns an associative array with defaults for missing keys.
  */

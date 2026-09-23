@@ -113,10 +113,21 @@ function anilist_normalize($media) {
 
     $totalEpisodes = !empty($media['episodes']) ? (int)$media['episodes'] : 0;
     $nextAiring = $media['nextAiringEpisode'] ?? null;
-    // Episodes already out: everything AniList knows about, or next-1 if still airing.
-    $airedEpisodes = $totalEpisodes;
+    // Episodes actually OUT. AniList knows the total from day one (12/12), so
+    // the old `aired = total` marked every row playable — watch.php's lock
+    // check (aired < total) could never fire. Correct semantics:
+    //   nextAiring known → next-1 (next one hasn't aired), capped by total
+    //   NOT_YET_RELEASED → 0
+    //   otherwise        → total (finished / no schedule = all out)
     if ($nextAiring && !empty($nextAiring['episode'])) {
-        $airedEpisodes = max($airedEpisodes, (int)$nextAiring['episode'] - 1);
+        $airedEpisodes = max(0, (int)$nextAiring['episode'] - 1);
+        if ($totalEpisodes > 0) {
+            $airedEpisodes = min($airedEpisodes, $totalEpisodes);
+        }
+    } elseif (($media['status'] ?? '') === 'NOT_YET_RELEASED') {
+        $airedEpisodes = 0;
+    } else {
+        $airedEpisodes = $totalEpisodes;
     }
 
     $startDate = $media['startDate'] ?? [];
@@ -176,8 +187,12 @@ function anilist_normalize($media) {
 /** Attach the current airing episode number for home/schedule cards. */
 function anilist_card_episode($media) {
     if (!empty($media['nextAiringEpisode']['episode'])) {
-        return max(1, (int)$media['nextAiringEpisode']['episode'] - 1);
+        // next-1 = episodes out. null while waiting for the premiere (ep 1
+        // still upcoming) so cards show "?" instead of a phantom current EP.
+        $aired = (int)$media['nextAiringEpisode']['episode'] - 1;
+        return $aired > 0 ? $aired : null;
     }
+    if (($media['status'] ?? '') === 'NOT_YET_RELEASED') return null;
     if (!empty($media['episodes'])) return (int)$media['episodes'];
     return null;
 }
@@ -248,6 +263,16 @@ function anilist_search($term, $limit = 20) {
         'perPage' => min(50, max(1, (int)$limit)),
         'search'  => $term,
         'sort'    => ['SEARCH_MATCH'],
+    ], CACHE_TTL_LIST);
+}
+
+/** Unreleased titles (next season / premiere pending) — homepage Upcoming sidebar. */
+function anilist_upcoming_media($limit = 12) {
+    return anilist_media_page([
+        'page'    => 1,
+        'perPage' => min(50, max(1, (int)$limit)),
+        'sort'    => ['POPULARITY_DESC'],
+        'status'  => 'NOT_YET_RELEASED',
     ], CACHE_TTL_LIST);
 }
 
@@ -569,6 +594,41 @@ function anilist_schedule($fromTs, $toTs, $tz = 'Asia/Dhaka') {
     unset($b);
 
     return array_values($buckets);
+}
+
+/**
+ * Exact future airing timestamps for a title, keyed by episode number.
+ *
+ * Uses Media.airingSchedule(notYetAired: true) — verified live against the
+ * AniList API: returns future nodes with airingAt (unix) + episode. AniList
+ * only knows a limited window ahead, so callers must fall back to a weekly
+ * estimate for episodes beyond the last returned node.
+ *
+ * @param int $anilist_id
+ * @return array<int,int> episode => unix ts ([] on failure)
+ */
+function anilist_upcoming_airing($anilist_id) {
+    $anilist_id = (int)$anilist_id;
+    if ($anilist_id <= 0) return [];
+
+    $data = anilist_query("
+        query (\$id: Int) {
+            Media(id: \$id, type: ANIME) {
+                airingSchedule(notYetAired: true) {
+                    nodes { airingAt episode }
+                }
+            }
+        }
+    ", ['id' => $anilist_id], CACHE_TTL_SCHEDULE);
+
+    $nodes = $data['Media']['airingSchedule']['nodes'] ?? [];
+    $map = [];
+    foreach ($nodes as $node) {
+        if (empty($node['airingAt']) || empty($node['episode'])) continue;
+        $map[(int)$node['episode']] = (int)$node['airingAt'];
+    }
+    ksort($map);
+    return $map;
 }
 
 // ─── Franchise season chain (SEQUEL / PREQUEL) ────────────────────────

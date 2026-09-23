@@ -311,17 +311,67 @@ if ($is_api && $anime_data) {
         $episodes_total = max($episodes_total, count($episodes_list));
     }
 
-    // Lock unreleased episodes (airing titles only: episodes exist but not all aired).
+    // Lock unreleased episodes — full planned count is listed, but not all aired.
+    // Firing condition: some rows out, not all out. aired==0 (pre-premiere /
+    // NOT_YET_RELEASED) must lock too; the old `aired > 0` silently skipped it.
     $kp_aired_eps = (int)($anime_data['aired_episodes'] ?? 0);
-    if (!$is_tmdb_movie && !empty($episodes_list) && $kp_aired_eps > 0 && $kp_aired_eps < $episodes_total) {
+    $kp_is_airing = in_array($anime_status, ['RELEASING', 'NOT_YET_RELEASED'], true);
+
+    // Exact schedule first (AniList airingSchedule, cached 1h) — it also extends
+    // the list: titles with an unknown/short total (e.g. One Piece: episodes=null)
+    // then get future rows up to the last episode AniList has scheduled.
+    $kp_air_map = [];
+    if ($kp_is_airing && $provider === 'anilist' && !empty($anilist_id) && function_exists('anilist_upcoming_airing')) {
+        $kp_air_map = anilist_upcoming_airing((int)$anilist_id);
+    }
+    if ($kp_air_map && !$is_tmdb_movie) {
+        $kp_have = 0;
+        $kp_foreign = false;
+        foreach ($episodes_list as $kp_row) {
+            $kp_have = max($kp_have, (int)($kp_row['number'] ?? 0));
+            if (($kp_row['src'] ?? '') !== '') $kp_foreign = true; // merged split-cour → numbers reset per member
+        }
+        $kp_air_max = max(array_keys($kp_air_map));
+        if (!$kp_foreign && $kp_air_max > $kp_have) {
+            for ($kp_n = $kp_have + 1; $kp_n <= $kp_air_max; $kp_n++) {
+                $episodes_list[] = ['number' => $kp_n, 'title' => '', 'image' => '', 'aired' => ''];
+            }
+            $episodes_total = max($episodes_total, $kp_air_max);
+        }
+    }
+
+    $kp_can_lock = !$is_tmdb_movie && !empty($episodes_list) && $episodes_total > 0
+        && $kp_aired_eps < $episodes_total
+        && ($kp_aired_eps > 0 || !empty($next_airing) || $kp_is_airing);
+    if ($kp_can_lock) {
         $kp_next_air_ts = !empty($next_airing['airingAt']) ? (int)$next_airing['airingAt'] : 0;
         $kp_next_air_ep = !empty($next_airing['episode']) ? (int)$next_airing['episode'] : ($kp_aired_eps + 1);
+
+        // NOT_YET_RELEASED with no nextAiring: premiere from startDate (JST), weekly after.
+        if ($kp_next_air_ts === 0 && $anime_status === 'NOT_YET_RELEASED' && !empty($anime_data['aired'])) {
+            try {
+                $kp_premiere = new DateTime(
+                    (string)$anime_data['aired'] . ' 00:00:00',
+                    new DateTimeZone('Asia/Tokyo')
+                );
+                $kp_next_air_ts = $kp_premiere->getTimestamp();
+                $kp_next_air_ep = 1;
+            } catch (Exception $kp_date_err) {
+                $kp_next_air_ts = 0; // unknown date → rows still lock, no arrival shown
+            }
+        }
+
         foreach ($episodes_list as &$epLock) {
             $epNo = (int)($epLock['number'] ?? 0);
             if ($epNo > $kp_aired_eps) {
                 $epLock['lk'] = 1;
-                if ($kp_next_air_ts > 0) {
+                $kp_src_ok = ($epLock['src'] ?? '') === '' || $epLock['src'] === $raw_id;
+                if ($kp_src_ok && isset($kp_air_map[$epNo])) {
+                    $epLock['a'] = (int)$kp_air_map[$epNo];
+                    $epLock['ax'] = 1; // exact air time from AniList
+                } elseif ($kp_next_air_ts > 0) {
                     $epLock['a'] = $kp_next_air_ts + (($epNo - $kp_next_air_ep) * 604800);
+                    $epLock['ax'] = 0; // weekly estimate → UI shows "≈"
                 }
             }
         }
@@ -1085,7 +1135,7 @@ include_once './includes/header.php';
                 <?php endif; ?>
                 <?php if ($next_airing && !empty($next_airing['episode'])): ?>
                     <li><i class="fas fa-tower-broadcast"></i><strong>Next EP:</strong>
-                        <span class="kp-val"><?= (int)$next_airing['episode'] ?><?= !empty($next_airing['airingAt']) ? ' · ' . kp_e(date('D, d M', (int)$next_airing['airingAt'])) : '' ?></span>
+                        <span class="kp-val"><?= (int)$next_airing['episode'] ?><?= !empty($next_airing['airingAt']) ? ' · ' . kp_e(date('D, d M · g:i A', (int)$next_airing['airingAt'])) : '' ?><?= !empty($next_airing['airingAt']) ? ' ' . kp_countdown_chip((int)$next_airing['airingAt']) : '' ?></span>
                     </li>
                 <?php endif; ?>
             </ul>
@@ -1199,6 +1249,7 @@ include_once './includes/header.php';
                     'dn'  => isset($e['dn']) ? (int)$e['dn'] : null,
                     'src' => (string)($e['src'] ?? ''),
                     'a'   => isset($e['a']) && $e['a'] ? (int)$e['a'] : null,
+                    'ax'  => !empty($e['ax']),
                     'lk'  => !empty($e['lk']),
                 ], $episodes_list),
                 JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP
@@ -2406,10 +2457,22 @@ include_once './includes/header.php';
                 lockI.className = 'fas fa-lock';
                 right.appendChild(lockI);
                 if (ep.a) {
+                    const when = new Date(ep.a * 1000);
+                    const exact = !!ep.ax;
                     const air = document.createElement('span');
-                    air.className = 'kp-ep-air';
-                    air.textContent = new Date(ep.a * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                    air.className = 'kp-ep-air' + (exact ? '' : ' kp-ep-air-est');
+                    // Exact schedule → "Oct 5 · 20:30"; weekly estimate → "≈ Oct 12".
+                    air.textContent = (exact ? '' : '\u2248 ') + when.toLocaleString(undefined, exact
+                        ? { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }
+                        : { month: 'short', day: 'numeric' });
+                    air.title = (exact ? 'Airs ' : 'Estimated ~ ') + when.toLocaleString();
                     right.appendChild(air);
+
+                    const cd = document.createElement('span');
+                    cd.className = 'kp-cd';
+                    cd.setAttribute('data-release', String(ep.a));
+                    cd.setAttribute('data-done-text', 'Airing now');
+                    right.appendChild(cd); // countdown.js ticks it → fires kp:released at 0
                 }
             } else {
                 const icon = document.createElement('i');
@@ -2420,7 +2483,14 @@ include_once './includes/header.php';
 
             el.style.setProperty('--kp-pct', '0%');
             el.addEventListener('click', function () {
-                if (isLocked) return;
+                if (isLocked) {
+                    if (typeof kpToast === 'function') {
+                        kpToast(ep.a
+                            ? 'EP ' + number + ' arrives ' + new Date(ep.a * 1000).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+                            : 'EP ' + number + " hasn't aired yet — locked until release", 'info');
+                    }
+                    return;
+                }
                 if (!isCur) {
                     window.location.href = './watch.php?id=' + encodeURIComponent(src) + '&ep=' + number;
                     return;
@@ -2469,6 +2539,31 @@ include_once './includes/header.php';
                 .catch(function () { /* progress is decoration — never block on it */ });
         }
 
+        // A countdown hit zero → that episode just premiered: unlock its row live
+        // (server-side aired data can lag up to the next cache TTL).
+        document.addEventListener('kp:released', function (e) {
+            const cd = e.detail && e.detail.el;
+            const row = cd && cd.closest && cd.closest('.kp-ep');
+            if (!row || !row.classList.contains('kp-ep-locked')) return;
+            row.classList.remove('kp-ep-locked');
+            const lockI = row.querySelector('.kp-ep-right .fa-lock');
+            if (lockI) lockI.classList.replace('fa-lock', 'fa-play-circle');
+            const air = row.querySelector('.kp-ep-air');
+            if (air) air.remove();
+            const numRaw = row.dataset.episode || '';
+            const p = numRaw.indexOf(':') >= 0 ? numRaw.split(':') : ['', numRaw];
+            const srcKey = p[0] || '';
+            const numKey = p[p.length - 1];
+            (KP.episodes || []).forEach(function (x) {
+                if (String(x.n) !== String(numKey)) return;
+                const xSrc = x.src || '';
+                if (xSrc === srcKey || (srcKey === '' && (xSrc === '' || xSrc === KP.id))) x.lk = false;
+            });
+            if (typeof kpToast === 'function') {
+                kpToast('Episode ' + numKey + ' has arrived — tap to play', 'success');
+            }
+        });
+
         function buildEpisodeList() {
             const container = document.getElementById('anikuro-episode-container');
             if (!container) return;
@@ -2491,8 +2586,20 @@ include_once './includes/header.php';
             }
 
             const frag = document.createDocumentFragment();
-            filtered.forEach(function (ep) { frag.appendChild(episodeElement(ep)); });
+            const lockedN = filtered.filter(function (e) { return !!e.lk; }).length;
+            let dividerDone = false;
+            filtered.forEach(function (ep) {
+                if (lockedN && ep.lk && !dividerDone) {
+                    dividerDone = true;
+                    const div = document.createElement('div');
+                    div.className = 'kp-ep-coming';
+                    div.innerHTML = '<i class="fas fa-lock"></i><span>Coming Soon</span><b>' + lockedN + ' scheduled</b>';
+                    frag.appendChild(div);
+                }
+                frag.appendChild(episodeElement(ep));
+            });
             container.appendChild(frag);
+            if (typeof kpCountdownScan === 'function') kpCountdownScan();
 
             Object.keys(resumeCache).forEach(function (stored) {
                 const ep = localEp(stored);
@@ -2576,6 +2683,8 @@ include_once './includes/header.php';
                         const hay = (el.dataset.search || '') + ' ' + el.dataset.episode;
                         el.style.display = (!q || hay.indexOf(q) !== -1) ? 'flex' : 'none';
                     });
+                    const comingRow = document.querySelector('#anikuro-episode-container .kp-ep-coming');
+                    if (comingRow) comingRow.style.display = q ? 'none' : 'flex';
                 }, 120);
             });
         }

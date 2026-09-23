@@ -100,6 +100,8 @@ include_once __DIR__ . '/performance.php';
     <script src="<?= htmlspecialchars(kp_asset('js', 'card-preview.js'), ENT_QUOTES, 'UTF-8') ?>" defer></script>
     <script src="<?= htmlspecialchars(kp_asset('js', 'home-sections.js'), ENT_QUOTES, 'UTF-8') ?>" defer></script>
     <script src="<?= htmlspecialchars(kp_asset('js', 'genre-scroll.js'), ENT_QUOTES, 'UTF-8') ?>" defer></script>
+    <!-- Release countdown chips (.kp-cd[data-release]) — ticks while pending, fires `kp:released` at zero -->
+    <script src="<?= htmlspecialchars(kp_asset('js', 'countdown.js'), ENT_QUOTES, 'UTF-8') ?>" defer></script>
 </head>
 
 

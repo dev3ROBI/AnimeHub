@@ -2437,6 +2437,41 @@
   text-transform: uppercase;
 }
 
+/* Release countdown chip — pairs with assets/js/countdown.js */
+.kp-cd {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(255, 46, 99, 0.14);
+  border: 1px solid rgba(255, 46, 99, 0.35);
+  color: #ff8fae;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.kp-cd.is-live {
+  background: rgba(16, 185, 129, 0.14);
+  border-color: rgba(16, 185, 129, 0.4);
+  color: #6ee7b7;
+}
+
+/* Upcoming sidebar — arrival date + live countdown row */
+.kp-side-air {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #9aa0a6;
+}
+.kp-side-air i { font-size: 9px; color: #ff2e63; }
+@media (max-width: 640px) {
+  .kp-side-air { display: none; }
+}
+
 .kp-side-go {
   flex: 0 0 auto;
   font-size: 11px;
