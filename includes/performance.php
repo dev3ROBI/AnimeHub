@@ -229,6 +229,22 @@ if (!defined('KP_PERF_LOADED')) {
 
             $attrs = kp_img_srcset($url, $opts);
 
+            /*
+             * Intrinsic width/height so the browser can reserve the box before
+             * bytes arrive (CLS). Only emitted when the CDN is one whose
+             * geometry we know: AniList covers and TMDB posters are 2:3, so
+             * the largest variant's width drives the height. $opts['dims']
+             * overrides for odd cases (['dims' => [1920, 1080]]); an unknown
+             * URL emits nothing rather than a wrong aspect.
+             */
+            $dims = $opts['dims'] ?? null;
+            if ($dims === null && function_exists('kp_img_dims')) {
+                $dims = kp_img_dims($url);
+            }
+            if (is_array($dims) && ($dims[0] ?? 0) > 0 && ($dims[1] ?? 0) > 0) {
+                $attrs .= ' width="' . (int)$dims[0] . '" height="' . (int)$dims[1] . '"';
+            }
+
             if ($priority) {
                 $attrs .= ' fetchpriority="high"';
             } elseif (!empty($opts['fetchpriority'])) {
@@ -247,21 +263,48 @@ if (!defined('KP_PERF_LOADED')) {
     }
 
     /**
-     * The single Google Fonts URL (three sheets used to mean three requests)
-     * plus the hosts worth a preconnect before the artwork starts.
+     * Intrinsic [width, height] for the artwork CDNs whose geometry is fixed:
+     * AniList covers and TMDB posters are 2:3 (verified 230×345 / 460×690 and
+     * w185×278). Returns null for anything else (backdrops, banners, uploads)
+     * so callers never reserve a wrong-shaped box.
+     */
+    if (!function_exists('kp_img_dims')) {
+        function kp_img_dims($url) {
+            if (!is_string($url) || $url === '') return null;
+
+            if (preg_match('~^https?://s4\\.anilist\\.co/file/anilistcdn/media/anime/cover/~i', $url)) {
+                return [460, 690];
+            }
+            // AniList documents every banner as 1920×1080 — the hero LCP image.
+            if (preg_match('~^https?://s4\\.anilist\\.co/file/anilistcdn/media/anime/banner/~i', $url)) {
+                return [1920, 1080];
+            }
+            // The URL names the served width; height follows the 2:3 poster box.
+            if (preg_match('~^https?://image\\.tmdb\\.org/t/p/(w185|w342|w500|w780)/~i', $url, $m)) {
+                $w = ['w185' => 185, 'w342' => 342, 'w500' => 500, 'w780' => 780][strtolower($m[1])];
+                return [$w, (int)round($w * 1.5)];
+            }
+            return null;
+        }
+    }
+
+    /**
+     * The self-hosted fonts stylesheet (assets/css/fonts.css — one local file
+     * covering Poppins 400/600, Fira Code 400, Tangerine) plus the hosts worth
+     * a preconnect before the artwork starts. Self-hosting removes the
+     * render-blocking round trip to fonts.googleapis.com/fonts.gstatic.com
+     * entirely — the fonts are same-origin and already long-cacheable.
      *
      * @return array{0:string,1:array<int,string>}  [fonts URL, preconnect hosts]
      */
     if (!function_exists('kp_font_and_cdn_hints')) {
         function kp_font_and_cdn_hints() {
-            $fonts = 'https://fonts.googleapis.com/css2?'
-                   . 'family=Poppins:wght@400;600&family=Fira+Code&family=Tangerine'
-                   . '&display=swap';
+            $fonts = kp_asset('css', 'fonts.css');
 
             $hosts = [
                 'https://s4.anilist.co',    // posters / banners
                 'https://image.tmdb.org',   // TMDB artwork
-                'https://cdnjs.cloudflare.com',
+                'https://cdnjs.cloudflare.com', // Font Awesome (head)
             ];
 
             return [$fonts, $hosts];

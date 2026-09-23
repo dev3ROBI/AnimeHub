@@ -101,9 +101,12 @@ html { background-color: #1e1e1e; }
 
 /* Off-screen sections skip layout/paint until they scroll in. */
 .show-container,
-.notice-box-container { content-visibility: auto; contain-intrinsic-size: 320px; }
-.kp-sidebar-section { content-visibility: auto; contain-intrinsic-size: 240px; }
+.notice-box-container { content-visibility: auto; contain-intrinsic-size: auto 320px; }
+.kp-sidebar-section { content-visibility: auto; contain-intrinsic-size: auto 240px; }
 .kp-hero-bg { content-visibility: auto; }
+/* Poster cards paint a badge overlay and a hover lift — isolate each card so
+   one repaint never walks the whole grid. */
+.movie-card { contain: layout paint; }
 
 /* --- Hero banner (home.css) --- */
 .kp-hero {

@@ -3,14 +3,14 @@
  * KitsuPlay asset minifier — build step without a build system.
  *
  *   php tools/minify.php          # write assets/css/*.min.css, assets/js/*.min.js,
- *                                 # user/js/*.min.js
+ *                                 # user/js/*.min.js, assets/pwa/*.min.js
  *   php tools/minify.php --check  # report what is stale, change nothing
  *   php tools/minify.php --clean  # delete every generated .min.* file
  *
  * header.php never references these files directly: kp_asset() serves the
  * .min.* build only while it exists and is at least as new as its source, so a
  * missing or stale build silently falls back to the original file. Run this
- * after editing anything in assets/css, assets/js or user/js.
+ * after editing anything in assets/css, assets/js, user/js or assets/pwa.
  *
  * The minifiers are deliberately conservative — comments, indentation and
  * redundant whitespace only. No identifier renaming, no statement joining, so
@@ -24,9 +24,10 @@ $root = dirname(__DIR__);
 $mode = $argv[1] ?? '';
 
 $targets = [
-    $root . '/assets/css' => 'css',
-    $root . '/assets/js'  => 'js',
-    $root . '/user/js'    => 'js',
+    [$root . '/assets/css', 'css'],
+    [$root . '/assets/js',  'js'],
+    [$root . '/user/js',    'js'],
+    [$root . '/assets/pwa', 'js'],
 ];
 
 /** Strip comments and squeeze whitespace out of a stylesheet. */
@@ -284,7 +285,7 @@ $written = 0;
 $skipped = 0;
 $stale   = 0;
 
-foreach ($targets as $dir => $ext) {
+foreach ($targets as [$dir, $ext]) {
 
     if (!is_dir($dir)) continue;
 

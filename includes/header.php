@@ -6,8 +6,8 @@
  */
 include_once __DIR__ . '/performance.php';
 
-// One Google Fonts request instead of three, plus the DNS/TLS warnings for the
-// image CDNs the catalogue streams from.
+// Self-hosted font sheet (local file, cacheable for a year) plus the
+// DNS/TLS warnings for the image CDNs the catalogue streams from.
 [$kpFontsUrl, $kpPreconnectHosts] = kp_font_and_cdn_hints();
 ?>
 <!DOCTYPE html>
@@ -20,12 +20,27 @@ include_once __DIR__ . '/performance.php';
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>KitsuPlay · Anime Streaming</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <?php foreach ($kpPreconnectHosts as $kpHost): ?>
     <link rel="preconnect" href="<?= htmlspecialchars($kpHost, ENT_QUOTES, 'UTF-8') ?>" />
     <?php endforeach; ?>
-    <link href="<?= htmlspecialchars($kpFontsUrl, ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet">
+    <?php
+    /*
+     * Fonts are self-hosted (assets/css/fonts.css + assets/fonts/*.woff2):
+     * same-origin, 1-year cache, no fonts.googleapis.com round trip before
+     * first paint. Preload the two faces the first screen draws with — body
+     * copy (Poppins) and the logo (Tangerine, bold) — so swap never flashes
+     * the fallback for above-the-fold text. Font preloads require crossorigin
+     * even same-origin because fonts are always fetched in CORS mode.
+     */
+    ?>
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="<?= htmlspecialchars(kp_base() . 'assets/fonts/poppins-400.woff2', ENT_QUOTES, 'UTF-8') ?>" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="<?= htmlspecialchars(kp_base() . 'assets/fonts/tangerine-700.woff2', ENT_QUOTES, 'UTF-8') ?>" />
+    <?php /* PWA: installable manifest + home-screen icons (iOS uses the apple one). */ ?>
+    <link rel="manifest" href="<?= htmlspecialchars(kp_base() . 'manifest.json', ENT_QUOTES, 'UTF-8') ?>" />
+    <link rel="icon" type="image/png" href="<?= htmlspecialchars(kp_base() . 'assets/icons/favicon-48.png', ENT_QUOTES, 'UTF-8') ?>" />
+    <link rel="apple-touch-icon" href="<?= htmlspecialchars(kp_base() . 'assets/icons/apple-touch-icon.png', ENT_QUOTES, 'UTF-8') ?>" />
+    <?php /* fonts.css (local) replaces the old Google Fonts <link>. */ ?>
+    <link rel="stylesheet" href="<?= htmlspecialchars($kpFontsUrl, ENT_QUOTES, 'UTF-8') ?>" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
 
     <?php

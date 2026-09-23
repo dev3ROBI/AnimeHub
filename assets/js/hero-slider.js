@@ -326,7 +326,7 @@
         }
         startX = startY = null;
         start();
-    });
+    }, { passive: true });
 
     slides.forEach((s, i) => { if (i !== 0) s.setAttribute('tabindex', '-1'); });
 

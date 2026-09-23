@@ -70,6 +70,12 @@ AddDefaultCharset UTF-8
         Header set Cache-Control "public, max-age=2592000"
     </FilesMatch>
 
+    # The PWA manifest is fetched with credentials-relevant scope decisions;
+    # an hour is plenty and keeps icon swaps from lagging.
+    <FilesMatch "^manifest\.json$">
+        Header set Cache-Control "public, max-age=3600"
+    </FilesMatch>
+
     # Video / audio segments are big and stable.
     <FilesMatch "\.(mp4|webm|m4v|m3u8|ts|mp3|m4a)$">
         Header set Cache-Control "public, max-age=604800"
@@ -109,6 +115,18 @@ AddDefaultCharset UTF-8
 </IfModule>
 
 # ─── 4. Never serve these over HTTP ──────────────────────────────────────────
-<FilesMatch "\.(md|json|lock|log|sql|bak|ini)$">
+# JSON is denied wholesale EXCEPT the PWA manifest (which browsers must fetch).
+<FilesMatch "^(?!manifest\.json$).+\.json$">
     Require all denied
+</FilesMatch>
+<FilesMatch "\.(md|lock|log|sql|bak|ini)$">
+    Require all denied
+</FilesMatch>
+
+# ─── 5. Service worker must revalidate ───────────────────────────────────────
+# sw.js lives at the app root and its byte changes signal an app update; the
+# 1-year immutable rule above would delay updates for up to a day (the HTTP
+# cache is bypassed for SW scripts only after 24h). Declared last so it wins.
+<FilesMatch "^sw\.js$">
+    Header set Cache-Control "no-cache, must-revalidate"
 </FilesMatch>

@@ -14,7 +14,7 @@
 .show-container,
 .notice-box-container {
   content-visibility: auto;
-  contain-intrinsic-size: 320px;
+  contain-intrinsic-size: auto 320px;
 }
 
 /* Lazy-load hero background images */
@@ -25,7 +25,7 @@
 /* Sidebar sections: defer rendering off-screen on mobile */
 .kp-sidebar-section {
   content-visibility: auto;
-  contain-intrinsic-size: 240px;
+  contain-intrinsic-size: auto 240px;
 }
 
 
@@ -610,6 +610,9 @@
 .kp-hero.is-active img.kp-hero-bg,
 .kp-hero-single img.kp-hero-bg {
   animation-play-state: running;
+  /* Only the slide currently animating gets a compositor layer — never the
+     whole deck (a standing will-change on every slide pins GPU memory). */
+  will-change: transform;
 }
 
 @keyframes kpHeroDrift {

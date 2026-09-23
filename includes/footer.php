@@ -20,6 +20,19 @@
     <!-- Footer styles live in assets/css/nav_style.css (see "Site footer"):
          a <style> block down here forced a second style recalculation on
          every page. -->
+
+    <!-- PWA: register the root-scoped service worker (offline shell) and
+         wire the install banner. Script loaded deferred; the banner CSS is
+         injected only if the browser actually offers an install prompt.
+         kp_asset() adds ?v=<mtime> so the immutable .js rule stays safe. -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function () {
+                navigator.serviceWorker.register('<?= kp_base() ?>sw.js').catch(function () {});
+            });
+        }
+    </script>
+    <script src="<?= htmlspecialchars(kp_asset('js', 'assets/pwa/install-prompt.js'), ENT_QUOTES, 'UTF-8') ?>" defer></script>
 </body>
 <script>
     document.addEventListener("contextmenu", function (e) {

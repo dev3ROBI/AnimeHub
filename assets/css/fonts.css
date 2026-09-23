@@ -1,0 +1,47 @@
+/*
+ * Self-hosted web fonts — replaces the old fonts.googleapis.com <link>.
+ * Latin subset only (~87 KB total for 5 faces, was ~150 KB+ across subsets),
+ * font-display: swap so text never stays invisible while a face resolves.
+ * Files come from tools/fetch-fonts.ps1; paths are relative to this sheet
+ * (assets/css/ → assets/fonts/), so they resolve from every page depth.
+ */
+
+@font-face {
+  font-family: 'Poppins';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/poppins-400.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Poppins';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('../fonts/poppins-600.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Fira Code';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/firacode-400.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Tangerine';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/tangerine-400.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Tangerine';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../fonts/tangerine-700.woff2') format('woff2');
+}

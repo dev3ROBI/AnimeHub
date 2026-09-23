@@ -1,0 +1,76 @@
+/*
+ * Install banner — styles for the DOM built by install-prompt.js
+ * (.kp-install-banner + .kp-install-text / .kp-install-actions). Loaded on
+ * demand by that script, so pages that never see a prompt pay 0 bytes.
+ */
+.kp-install-banner {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  background: #292929;
+  color: #fff;
+  border: 1px solid rgba(255, 46, 99, 0.45);
+  border-radius: 14px;
+  padding: 14px 16px;
+  font-family: 'Poppins', sans-serif;
+  font-size: 14px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  animation: kpInstallIn 0.35s ease;
+}
+@keyframes kpInstallIn {
+  from { transform: translateY(24px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+.kp-install-text {
+  flex: 1 1 180px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.kp-install-text strong { font-weight: 600; font-size: 14px; }
+.kp-install-text span   { color: #b9b9b9; font-size: 12.5px; line-height: 1.4; }
+.kp-install-actions { display: flex; align-items: center; gap: 8px; }
+.kp-install-btn {
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 13px;
+  padding: 9px 16px;
+  border-radius: 999px;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.kp-install-yes { background: #ff2e63; color: #fff; }
+.kp-install-yes:hover { background: #ff4d7a; transform: translateY(-1px); }
+.kp-install-no {
+  background: transparent;
+  color: #b9b9b9;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+}
+.kp-install-no:hover { color: #fff; border-color: rgba(255, 255, 255, 0.45); }
+.kp-install-close {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px;
+}
+.kp-install-close:hover { color: #fff; }
+@media (min-width: 768px) {
+  .kp-install-banner { left: auto; right: 24px; bottom: 24px; max-width: 380px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kp-install-banner { animation: none; }
+}
