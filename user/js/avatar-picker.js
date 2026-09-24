@@ -35,11 +35,32 @@
 
     let lastFocus = null;
 
+    // Fade each avatar in once its bytes arrive (avoids blank flash pop-in).
+    function bindAvatarImages() {
+        if (!grid) return;
+        grid.querySelectorAll('.kp-avatar-choice').forEach((btn) => {
+            const img = btn.querySelector('img');
+            if (!img) return;
+            const done = () => {
+                img.classList.add('is-loaded');
+                btn.classList.add('is-ready');
+            };
+            if (img.complete && img.naturalWidth > 0) {
+                done();
+            } else {
+                img.addEventListener('load', done, { once: true });
+                img.addEventListener('error', done, { once: true });
+            }
+        });
+    }
+
     function open() {
         lastFocus = document.activeElement;
         modal.classList.add('is-open');
         modal.setAttribute('aria-hidden', 'false');
         document.body.classList.add('no-scroll');
+        // Modal just became visible — kick lazy loads + attach handlers.
+        bindAvatarImages();
         const selected = grid && grid.querySelector('.kp-avatar-choice.is-selected');
         const focusTarget = selected || (grid && grid.querySelector('.kp-avatar-choice'));
         if (focusTarget) focusTarget.focus();
@@ -153,4 +174,7 @@
             items[next].focus();
         });
     }
+
+    // Wire any already-cached images at parse time (cached = instant, no flash).
+    bindAvatarImages();
 })();

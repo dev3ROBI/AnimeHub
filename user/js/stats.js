@@ -103,8 +103,11 @@
                 img.src = anime.poster;
                 img.alt = '';
                 img.loading = 'lazy';
-                img.onerror = function () { img.remove(); };
+                img.decoding = 'async';
+                img.onerror = function () { img.onerror = null; img.src = './uploads/thumbnails/default.png'; };
                 poster.appendChild(img);
+                // Blurred poster wash behind the row (theme property set per-row).
+                row.style.setProperty('--kp-top-bg', 'url("' + anime.poster.replace(/"/g, '\\"') + '")');
             }
             row.appendChild(poster);
 
@@ -308,7 +311,7 @@
                 if (item.more > 0) chips += '<span class="kp-day-chip is-more">+' + item.more + '</span>';
 
                 html += '<a class="kp-day-row" href="' + escapeHtml(item.url || '#') + '">'
-                    + '<span class="kp-day-poster">' + (item.poster ? '<img src="' + escapeHtml(item.poster) + '" alt="" loading="lazy" decoding="async">' : '') + '</span>'
+                    + '<span class="kp-day-poster">' + (item.poster ? '<img src="' + escapeHtml(item.poster) + '" alt="" loading="lazy" decoding="async" onerror="this.onerror=null;this.src=\'./uploads/thumbnails/default.png\'">' : '') + '</span>'
                     + '<span class="kp-day-main">'
                     +   '<span class="kp-day-name">' + escapeHtml(item.title || item.slug || '') + '</span>'
                     +   (chips ? '<span class="kp-day-chips">' + chips + '</span>' : '')

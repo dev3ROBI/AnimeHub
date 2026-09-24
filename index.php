@@ -80,29 +80,14 @@ foreach (array_merge($popular, $trending) as $item) {
     $newOnSite[] = $item;
 }
 
-// Upcoming — dedicated NOT_YET_RELEASED fetch first (popular/trending lists
-// rarely contain unreleased titles, which left this sidebar empty), then any
-// airing-with-future-ep items from those lists as filler.
+// Upcoming — AniList schedule + TMDB movies/TV with real timestamps
+// (catalog_upcoming_feed), falling back to unreleased-only if that fails.
 $upcoming = [];
-if (function_exists('anilist_upcoming_media')) {
+if (function_exists('catalog_upcoming_feed')) {
+    $upcoming = catalog_upcoming_feed(36);
+}
+if (!$upcoming && function_exists('anilist_upcoming_media')) {
     $upcoming = anilist_upcoming_media(12);
-}
-$seenUp = [];
-foreach ($upcoming as $upIt) {
-    if (!empty($upIt['id'])) $seenUp[$upIt['id']] = true;
-}
-foreach (array_merge($popular, $trending) as $item) {
-    if (count($upcoming) >= 12) break;
-    $id = $item['id'] ?? null;
-    if (empty($id) || isset($seenUp[$id])) continue;
-    $aired = $item['aired_episodes'] ?? 0;
-    $isUp = (!$aired || $aired <= 0)
-        || ($item['status'] ?? '') === 'NOT_YET_RELEASED'
-        || (int)($item['next_airing']['airingAt'] ?? 0) > time();
-    if ($isUp) {
-        $seenUp[$id] = true;
-        $upcoming[] = $item;
-    }
 }
 
 // Top trending for sidebar

@@ -4,42 +4,34 @@
  * 1. Sidebar "Top Trending" tabs — DAY / WEEK / MONTH each pull a different
  *    AniList window (trending / currently airing / this season) and swap the
  *    rendered rows in place. Periods are cached after the first fetch.
- * 2. Genre browser — clicking a chip loads a few titles for that genre and
+ * 2. Upcoming day tabs (TODAY / NEXT / LATER) — pure class toggle, no network.
+ * 3. Genre browser — clicking a chip loads a few titles for that genre and
  *    points the "View all" link at the matching genre page.
  *
- * Both widgets are progressive: without this file the server-rendered content
+ * All widgets are progressive: without this file the server-rendered content
  * and the plain genre links still work.
  */
 (function () {
     'use strict';
 
-    // ─── Sidebar trending tabs ──────────────────────────────────────
-    // On low-end mobile (coarse pointer), keep only the server-rendered DAY
-    // list and make the WEEK/MONTH tabs inert — saves a network + decode cost.
-    const tabs = Array.from(document.querySelectorAll('.kp-trend-tab'));
+    // ─── Sidebar trending tabs (DAY / WEEK / MONTH) ────────────────
+    // Scoped to #trendTabs so the Upcoming tabs (same .kp-trend-tab class)
+    // are never disabled or double-bound. Works on touch as well as mouse —
+    // a previous coarse-pointer shortcut turned every switch off on phones.
+    const trendTabs = Array.from(document.querySelectorAll('#trendTabs .kp-trend-tab'));
     const trendList = document.getElementById('kpTrendList');
-    const isCoarse = window.matchMedia('(pointer: coarse)').matches;
 
-    if (tabs.length && trendList) {
-        if (isCoarse) {
-            tabs.forEach((tab) => {
-                tab.disabled = true;
-                tab.style.opacity = '0.5';
-                tab.style.cursor = 'default';
-            });
-            return;
-        }
-
+    if (trendTabs.length && trendList) {
         const endpoint = './includes/trending_period.php';
         const cache = new Map();
 
         // Whatever the server rendered is already the current period's list.
         cache.set(trendList.dataset.period || 'day', trendList.innerHTML);
 
-        tabs.forEach((tab) => {
+        trendTabs.forEach((tab) => {
             tab.addEventListener('click', () => {
                 const period = tab.dataset.period || 'day';
-                tabs.forEach((t) => t.classList.toggle('active', t === tab));
+                trendTabs.forEach((t) => t.classList.toggle('active', t === tab));
 
                 if (cache.has(period)) {
                     trendList.innerHTML = cache.get(period);

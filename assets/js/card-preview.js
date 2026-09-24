@@ -54,6 +54,7 @@
         thumb.src = data.p || '';
         thumb.alt = '';
         thumb.loading = 'lazy';
+        thumb.onerror = function () { this.onerror = null; this.src = './uploads/thumbnails/default.png'; };
 
         const meta = el('div', 'kp-preview-meta');
         meta.appendChild(el('h4', 'kp-preview-title', data.t || ''));

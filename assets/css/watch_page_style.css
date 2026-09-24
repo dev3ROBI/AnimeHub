@@ -1698,7 +1698,7 @@
 }
 
 .kp-next-box {
-  background: #1a1a2e;
+  background: #232323;
   border: 1px solid rgba(255, 46, 99, 0.3);
   border-radius: 14px;
   padding: 28px 32px;
@@ -2026,18 +2026,20 @@ button.report-option {
 .kp-report-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.72);
+  background: rgba(0, 0, 0, 0.68);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
 .kp-report-dialog {
   position: relative;
   width: 100%;
   max-width: 460px;
-  padding: 18px;
-  background: #1c1c22;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+  padding: 0;
+  background: linear-gradient(145deg, #252525, #1e1e1e);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 46, 99, 0.1);
 }
 
 .kp-report-head {
@@ -2045,7 +2047,8 @@ button.report-option {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 14px;
+  padding: 14px 14px 14px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .kp-report-head h3 {
@@ -2053,29 +2056,48 @@ button.report-option {
   align-items: center;
   gap: 8px;
   margin: 0;
-  font-size: 15px;
-  color: #f1f1f5;
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
 }
 
 .kp-report-head h3 i {
-  color: #ffb020;
+  color: #ff2e63;
 }
 
 .kp-report-close {
-  background: none;
-  border: none;
-  color: #8a8a96;
-  font-size: 24px;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.07);
+  color: #ccc;
+  font-size: 20px;
   line-height: 1;
   cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: background 0.2s ease, color 0.2s ease;
 }
 
 .kp-report-close:hover {
+  background: #ff2e63;
   color: #fff;
+}
+
+.kp-report-dialog > :not(.kp-report-head) {
+  margin-left: 18px;
+  margin-right: 18px;
+}
+
+.kp-report-dialog > :last-child {
+  margin-bottom: 18px;
 }
 
 .kp-report-field {
   display: block;
+  margin-top: 14px;
   margin-bottom: 12px;
 }
 
@@ -2166,3 +2188,19 @@ button.report-option {
 [data-theme="light"] .kp-skel-row { background: linear-gradient(90deg, #e8e8ef 25%, #f4f4f9 37%, #e8e8ef 63%); background-size: 400% 100%; }
 [data-theme="light"] .kp-ep-loading,
 [data-theme="light"] .kp-note-state { color: #6b6b78; }
+[data-theme="light"] .kp-report-dialog {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(255, 46, 99, 0.12);
+}
+[data-theme="light"] .kp-report-head { border-bottom-color: rgba(0, 0, 0, 0.08); }
+[data-theme="light"] .kp-report-head h3 { color: #1a1a1a; }
+[data-theme="light"] .kp-report-close { background: rgba(0, 0, 0, 0.06); color: #444; }
+[data-theme="light"] .kp-report-close:hover { background: #ff2e63; color: #fff; }
+[data-theme="light"] .kp-report-field select,
+[data-theme="light"] .kp-report-field textarea {
+  background: #fff;
+  color: #1a1a1a;
+  border-color: #d7d7e0;
+}
+[data-theme="light"] .kp-report-cancel { color: #444; border-color: #c8c8d2; }

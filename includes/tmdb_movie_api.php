@@ -221,6 +221,10 @@ function tmdb_movie_normalize($m) {
         'is_adult'        => !empty($m['adult']),
         'has_dub'         => false,
         'content_type'    => 'movie',
+        'language'        => !empty($m['original_language']) ? strtolower((string)$m['original_language']) : null,
+        'country'         => !empty($m['production_countries'][0]['iso_3166_1'])
+            ? strtoupper((string)$m['production_countries'][0]['iso_3166_1'])
+            : (!empty($m['origin_country'][0]) ? strtoupper((string)$m['origin_country'][0]) : null),
     ];
 
     tmdb_apply_availability($item, $m);
@@ -247,7 +251,6 @@ function tmdb_tv_normalize($m) {
     }
 
     $origin = $m['origin_country'] ?? [];
-    $lang = !empty($origin) ? $origin[0] : ($m['original_language'] ?? '');
 
     $item = [
         'id'              => 'tmdb:tv:' . $id,
@@ -296,6 +299,8 @@ function tmdb_tv_normalize($m) {
         'seasons_count'   => $m['number_of_seasons'] ?? 0,
         'total_episodes'  => $m['number_of_episodes'] ?? 0,
         'networks'        => array_map(function($n) { return $n['name'] ?? ''; }, $m['networks'] ?? []),
+        'language'        => !empty($m['original_language']) ? strtolower((string)$m['original_language']) : null,
+        'country'         => !empty($origin[0]) ? strtoupper((string)$origin[0]) : null,
     ];
 
     tmdb_apply_availability($item, $m);
@@ -402,7 +407,8 @@ function tmdb_movie_detail($id) {
     if ($id <= 0) return null;
 
     // v3: payload gained the derived availability (status RELEASED/UPCOMING).
-    $key = api_cache_key('tmdb_movie', ['detail:v3', $id]);
+    // v4: payload gained language/country (original_language, production_countries).
+    $key = api_cache_key('tmdb_movie', ['detail:v4', $id]);
     $hit = api_cache_get($key);
     if (is_array($hit)) return $hit;
 
@@ -651,7 +657,8 @@ function tmdb_tv_detail($id) {
     // built by the UI, and a placeholder title printed as a junk "· S1 E1"
     // suffix once the real season data started overriding it. v5: payloads
     // gained the derived availability (status RELEASING/…, next_airing, tvq).
-    $key = api_cache_key('tmdb_tv', ['detail:v5', $id]);
+    // v6: payload gained language/country (original_language, origin_country).
+    $key = api_cache_key('tmdb_tv', ['detail:v6', $id]);
     $hit = api_cache_get($key);
     if (is_array($hit)) return $hit;
 

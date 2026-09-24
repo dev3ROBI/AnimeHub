@@ -386,15 +386,41 @@ $sql = "SELECT id, notification_type, anime_title, anime_slug, episode, message,
      . " LIMIT " . (int)$limit . " OFFSET " . (int)$offset;
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
+
+// Posters for the page — one catalogue lookup per unique media slug, memoised
+// so a list of 15 episode alerts never costs 15 cold provider calls.
+include_once __DIR__ . '/catalog.php';
+$posterMemo = [];
+$resolvePoster = function (string $slug, string $title) use (&$posterMemo): string {
+    if ($slug === '' || strpos($slug, 'badge:') === 0 || strpos($slug, 'rank:') === 0 || $slug === 'welcome') {
+        return '';
+    }
+    if (array_key_exists($slug, $posterMemo)) return $posterMemo[$slug];
+    $poster = '';
+    try {
+        $info = catalog_info($slug, $title !== '' ? $title : null);
+        $poster = is_array($info) ? (string)($info['poster'] ?? '') : '';
+        // Placeholder art is worse than the type icon — treat it as missing.
+        if ($poster !== '' && function_exists('catalog_placeholder_poster') && $poster === catalog_placeholder_poster()) {
+            $poster = '';
+        }
+    } catch (Exception $e) {
+        $poster = '';
+    }
+    $posterMemo[$slug] = $poster;
+    return $poster;
+};
+
 $allNotifs = [];
 $unread = 0;
 foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $n) {
     if (!$n['is_read']) $unread++;
     $slug = (string)($n['anime_slug'] ?? '');
     $ep   = (int)$n['episode'];
+    $type = $n['notification_type'] ?? 'episode';
     $allNotifs[] = [
         'id'       => (int)$n['id'],
-        'type'     => $n['notification_type'] ?? 'episode',
+        'type'     => $type,
         'title'    => $n['anime_title'],
         'slug'     => $slug,
         'episode'  => $ep,
@@ -404,7 +430,11 @@ foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $n) {
         // Where to go and what to draw are derived from the slug, so a link
         // shape change (TMDB TV gaining &season=) fixes existing rows too.
         'url'      => kp_notify_link($slug, $ep),
-        'icon'     => kp_notify_icon($n['notification_type'] ?? 'episode', $slug),
+        'icon'     => kp_notify_icon($type, $slug),
+        // Cover art for the list thumb; empty on system notes (badges etc.).
+        'poster'   => ($type === 'episode' || $type === 'follow')
+            ? $resolvePoster($slug, (string)($n['anime_title'] ?? ''))
+            : '',
     ];
 }
 

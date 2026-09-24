@@ -169,6 +169,46 @@ if (!empty($_SESSION['userID'])) {
 ?>
 
 <body class="<?= trim($kp_body_class) ?>" data-user="<?= isset($_SESSION['userID']) ? '1' : '0' ?>">
+    <!-- Boot loader: styles are inlined in critical.css, so this paints before
+         the async sheets swap in. Hidden once DOM + lazy sheets are ready (or a
+         hard timeout fires); noscript kills it when JS never runs. -->
+    <div id="kp-boot" aria-hidden="true">
+        <div class="kp-boot-spinner"></div>
+        <p>Loading KitsuPlay…</p>
+    </div>
+    <noscript><style>#kp-boot{display:none}</style></noscript>
+    <script>
+        (function () {
+            var boot = document.getElementById('kp-boot');
+            if (!boot) return;
+            var t0 = Date.now(), gone = false;
+            function hide() {
+                if (gone) return;
+                gone = true;
+                boot.classList.add('kp-boot-out');
+                setTimeout(function () {
+                    if (boot.parentNode) boot.parentNode.removeChild(boot);
+                }, 450);
+            }
+            function ready() {
+                if (document.readyState === 'loading') return false;
+                return !document.querySelector('link[data-kp-lazy]:not([data-kp-ready])');
+            }
+            function check() {
+                if (gone || !ready()) return;
+                var wait = Math.max(0, 300 - (Date.now() - t0)); // min on-screen time
+                setTimeout(hide, wait);
+            }
+            document.addEventListener('DOMContentLoaded', check);
+            var iv = setInterval(function () {
+                check();
+                if (gone) clearInterval(iv);
+            }, 100);
+            window.addEventListener('load', hide);
+            window.addEventListener('pageshow', function (e) { if (e.persisted) hide(); });
+            setTimeout(function () { clearInterval(iv); hide(); }, 4500); // hard cap
+        })();
+    </script>
     <!-- =================== Overlay =================== -->
     <div class="overlay" id="overlay"></div>
     <!-- =================== /Overlay =================== -->
@@ -176,10 +216,13 @@ if (!empty($_SESSION['userID'])) {
     <!-- =================== Logout Confirmation Modal =================== -->
     <div id="logout-popup-modal" class="logout-popup-modal">
         <div class="logout-popup-content">
-            <div class="logout-popup-icon">
-                <i class="fas fa-right-from-bracket"></i>
+            <div class="kp-modal-head">
+                <div class="kp-modal-head-ic logout-popup-head-ic">
+                    <i class="fas fa-right-from-bracket"></i>
+                </div>
+                <h3 id="logout-popupTitle">Confirm Logout</h3>
+                <button type="button" class="kp-modal-close" onclick="closeLogoutPopup()" aria-label="Close">&times;</button>
             </div>
-            <h3 id="logout-popupTitle">Confirm Logout</h3>
             <p id="logout-popupMessage">Are you sure you want to log out of your account?</p>
             <div class="logout-popup-actions">
                 <button class="logout-popup-btn logout-cancel-btn" onclick="closeLogoutPopup()">
@@ -196,10 +239,13 @@ if (!empty($_SESSION['userID'])) {
     <!-- =================== Coming Soon Modal =================== -->
     <div id="coming-soon-modal" class="coming-soon-modal">
         <div class="coming-soon-content">
-            <div class="coming-soon-icon">
-                <i class="fas fa-lock"></i>
+            <div class="kp-modal-head">
+                <div class="kp-modal-head-ic coming-soon-head-ic">
+                    <i class="fas fa-lock"></i>
+                </div>
+                <h3>Coming Soon</h3>
+                <button type="button" class="kp-modal-close" onclick="closeComingSoon()" aria-label="Close">&times;</button>
             </div>
-            <h3>Coming Soon</h3>
             <p id="coming-soon-text">This section is under development and will be available soon.</p>
             <button class="coming-soon-btn" onclick="closeComingSoon()">
                 <i class="fas fa-check"></i> Got it
@@ -286,8 +332,7 @@ if (!empty($_SESSION['userID'])) {
                     </div>
                     <div class="search-suggestions" id="searchSuggestions">
                         <div class="kp-sug-section">
-                            <p><i class="fas fa-fire"></i> Trending: One Piece, Solo Leveling, Frieren</p>
-                            <p><i class="fas fa-clock"></i> Try: Demon Slayer, Jujutsu Kaisen, Dandadan</p>
+                            <p class="kp-sug-loading"><i class="fas fa-spinner fa-spin"></i> Loading suggestions…</p>
                         </div>
                     </div>
                     <div class="kp-search-foot">
@@ -328,10 +373,10 @@ if (!empty($_SESSION['userID'])) {
                             <i class="fas fa-spinner fa-spin"></i>
                             <span>Loading...</span>
                         </div>
+                        <div id="notif-sentinel" class="kp-notif-sentinel" aria-hidden="true" style="display:none;">
+                            <i class="fas fa-spinner fa-spin"></i>
+                        </div>
                     </div>
-                    <button type="button" id="notif-more" class="kp-notif-more" style="display:none;">
-                        Load more <i class="fas fa-chevron-down"></i>
-                    </button>
                 </div>
             </div>
 
@@ -563,6 +608,7 @@ if (!empty($_SESSION['userID'])) {
                 togglePopup(searchPopup, e);
                 // Tapping the icon should leave you typing, keyboard included.
                 if (searchPopup.classList.contains("active")) {
+                    if (!searchInput.value.trim()) loadSearchHistory();
                     setTimeout(() => searchInput.focus(), 120);
                 }
             });
@@ -570,7 +616,6 @@ if (!empty($_SESSION['userID'])) {
             bellIcon.addEventListener("click", (e) => {
                 togglePopup(notificationPopup, e);
                 if (!notificationPopup.classList.contains("active")) return;
-                notifPage = 1;
                 loadNotifications(false);
                 setTimeout(markAllRead, 600);
             });
@@ -619,7 +664,7 @@ if (!empty($_SESSION['userID'])) {
             let searchResults = [];   // last payload, for keyboard navigation
             let searchActive = -1;    // highlighted row index
             let searchAbort = null;
-            const defaultSuggestions = suggestionBox.innerHTML;
+            let trendingTitles = [];  // live titles for the empty panel
 
             searchInput.addEventListener("input", () => {
                 clearSearchBtn.style.display = searchInput.value.trim() ? "block" : "none";
@@ -652,76 +697,124 @@ if (!empty($_SESSION['userID'])) {
                 tv:    { label: 'TV',    icon: 'fa-solid fa-tv' }
             };
 
-            function loadSearchHistory() {
-                fetch('./includes/get_search_history.php?limit=8')
+            /** Pull live trending titles once per session for the idle panel. */
+            function ensureTrendingTitles() {
+                if (trendingTitles.length) return Promise.resolve(trendingTitles);
+                return fetch('./includes/trending.php')
                     .then(r => r.json())
-                    .then(data => {
-                        if (!Array.isArray(data) || data.length === 0) {
-                            suggestionBox.innerHTML = defaultSuggestions;
-                            return;
-                        }
-                        suggestionBox.innerHTML = '<div class="kp-history-header"><i class="fas fa-clock-rotate-left"></i> Recent Searches <button id="clearAllHistory" class="kp-history-clear">Clear all</button></div>';
-                        data.forEach(item => {
-                            const row = document.createElement('div');
-                            row.className = 'kp-sug kp-history-item';
+                    .then(list => {
+                        if (!Array.isArray(list)) return [];
+                        trendingTitles = list
+                            .filter(t => t && t.title)
+                            .map(t => ({
+                                title: t.title,
+                                imdb_id: t.imdb_id || t.id || '',
+                                poster: t.poster || ''
+                            }))
+                            .slice(0, 8);
+                        return trendingTitles;
+                    })
+                    .catch(() => []);
+            }
 
-                            const icon = document.createElement('i');
-                            icon.className = 'fas fa-clock';
+            /** One compact pill: used for both Recent and Trending rows. */
+            function makeSuggestChip(label, variant, term) {
+                const chip = document.createElement('button');
+                chip.type = 'button';
+                chip.className = 'kp-sug-chip' + (variant ? ' kp-sug-chip-' + variant : '');
+                const icon = variant === 'recent' ? 'fa-clock' : 'fa-fire';
+                chip.innerHTML = '<i class="fas ' + icon + '"></i><span></span>';
+                chip.querySelector('span').textContent = term;
+                chip.title = term;
+                chip.addEventListener('click', function() {
+                    searchInput.value = term;
+                    clearSearchBtn.style.display = 'block';
+                    searchInput.dispatchEvent(new Event('input'));
+                    searchInput.focus();
+                });
+                return chip;
+            }
 
-                            const text = document.createElement('span');
-                            text.className = 'kp-history-term';
-                            text.textContent = item.term;
+            function renderTrendingSection(titles) {
+                if (!titles.length) {
+                    suggestionBox.innerHTML = '<div class="kp-sug-section"><p class="kp-sug-loading"><i class="fas fa-magnifying-glass"></i> Start typing to search</p></div>';
+                    return;
+                }
+                suggestionBox.innerHTML = '<div class="kp-history-header"><i class="fas fa-fire-flame-curved"></i> Trending Now</div>';
+                const wrap = document.createElement('div');
+                wrap.className = 'kp-sug-chips';
+                titles.forEach(item => wrap.appendChild(makeSuggestChip(null, 'trend', item.title)));
+                suggestionBox.appendChild(wrap);
+            }
 
-                            const del = document.createElement('button');
-                            del.className = 'kp-history-del';
-                            del.innerHTML = '<i class="fas fa-xmark"></i>';
-                            del.title = 'Remove';
-                            del.addEventListener('click', function(e) {
-                                e.stopPropagation();
+            function loadSearchHistory() {
+                Promise.all([
+                    fetch('./includes/get_search_history.php?limit=5').then(r => r.json()).catch(() => []),
+                    ensureTrendingTitles()
+                ]).then(([history, trending]) => {
+                    const recent = (Array.isArray(history) ? history : []).slice(0, 5);
+                    if (!recent.length && !trending.length) {
+                        renderTrendingSection([]);
+                        return;
+                    }
+
+                    suggestionBox.innerHTML = '';
+
+                    if (recent.length) {
+                        const head = document.createElement('div');
+                        head.className = 'kp-history-header';
+                        head.innerHTML = '<i class="fas fa-clock-rotate-left"></i> Recent';
+                        const clearAll = document.createElement('button');
+                        clearAll.type = 'button';
+                        clearAll.className = 'kp-history-clear';
+                        clearAll.textContent = 'Clear';
+                        clearAll.addEventListener('click', function(e) {
+                            e.stopPropagation();
+                            recent.forEach(function(h) {
                                 fetch('./includes/delete_search_history.php', {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                                    body: 'term=' + encodeURIComponent(item.term)
-                                }).then(() => loadSearchHistory());
-                            });
-
-                            row.appendChild(icon);
-                            row.appendChild(text);
-                            row.appendChild(del);
-
-                            row.addEventListener('click', function() {
-                                searchInput.value = item.term;
-                                clearSearchBtn.style.display = 'block';
-                                searchInput.dispatchEvent(new Event('input'));
-                                searchInput.focus();
-                            });
-
-                            suggestionBox.appendChild(row);
-                        });
-
-                        var clearAll = document.getElementById('clearAllHistory');
-                        if (clearAll) {
-                            clearAll.addEventListener('click', function(e) {
-                                e.stopPropagation();
-                                data.forEach(function(h) {
-                                    fetch('./includes/delete_search_history.php', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                                        body: 'term=' + encodeURIComponent(h.term)
-                                    });
+                                    body: 'term=' + encodeURIComponent(h.term)
                                 });
-                                setTimeout(loadSearchHistory, 200);
                             });
-                        }
-                    })
-                    .catch(() => {
-                        suggestionBox.innerHTML = defaultSuggestions;
-                    });
+                            setTimeout(loadSearchHistory, 200);
+                        });
+                        head.appendChild(clearAll);
+                        suggestionBox.appendChild(head);
+
+                        const wrap = document.createElement('div');
+                        wrap.className = 'kp-sug-chips';
+                        recent.forEach(function(item) {
+                            wrap.appendChild(makeSuggestChip(null, 'recent', item.term));
+                        });
+                        suggestionBox.appendChild(wrap);
+                    }
+
+                    if (trending.length) {
+                        const head = document.createElement('div');
+                        head.className = 'kp-history-header' + (recent.length ? ' kp-trend-head' : '');
+                        head.innerHTML = '<i class="fas fa-fire-flame-curved"></i> Trending Now';
+                        suggestionBox.appendChild(head);
+
+                        const wrap = document.createElement('div');
+                        wrap.className = 'kp-sug-chips';
+                        trending.forEach(function(item) {
+                            wrap.appendChild(makeSuggestChip(null, 'trend', item.title));
+                        });
+                        suggestionBox.appendChild(wrap);
+                    }
+                }).catch(() => {
+                    suggestionBox.innerHTML = '<div class="kp-sug-section"><p class="kp-sug-loading"><i class="fas fa-magnifying-glass"></i> Start typing to search</p></div>';
+                });
             }
 
             searchInput.addEventListener('focus', function() {
                 if (!searchInput.value.trim()) loadSearchHistory();
             });
+
+            // Warm the trending list as soon as the script runs so the first
+            // open of the search popup is already filled with live titles.
+            ensureTrendingTitles();
 
             clearSearchBtn.addEventListener("click", () => {
                 searchInput.value = "";
@@ -866,6 +959,8 @@ if (!empty($_SESSION['userID'])) {
                     return;
                 }
                 const rows = suggestionBox.querySelectorAll('.kp-sug:not(.kp-history-item)');
+                // Trending chips live outside .kp-sug rows; Enter with no live
+                // results still runs the typed query below when empty.
                 if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
                     e.preventDefault();
                     searchActive = e.key === 'ArrowDown'
@@ -939,11 +1034,12 @@ if (!empty($_SESSION['userID'])) {
             const notifCountLabel = document.getElementById('notif-count-label');
             const notifMarkAllBtn = document.getElementById('notif-mark-all');
             const notifClearAllBtn = document.getElementById('notif-clear-all');
-            const notifMoreBtn = document.getElementById('notif-more');
+            const notifSentinel = document.getElementById('notif-sentinel');
             let lastUnreadCount = 0;
             let notifTypeFilter = '';
             let notifPage = 1;
             let notifPages = 1;
+            let notifLoading = false;
 
             // The two "notification behaviour" preferences from the Notification
             // tab. They were saved but never read, so both toggles did nothing.
@@ -1015,14 +1111,36 @@ if (!empty($_SESSION['userID'])) {
 
                 var icon = document.createElement('div');
                 icon.className = 'kp-notif-icon';
-                icon.innerHTML = '<i class="' + (n.icon || notifTypeIcon(n.type)) + '"></i>';
+                if (n.poster) {
+                    icon.classList.add('kp-notif-cover');
+                    var cover = document.createElement('img');
+                    cover.src = n.poster;
+                    cover.alt = '';
+                    cover.loading = 'lazy';
+                    cover.decoding = 'async';
+                    cover.onerror = function () {
+                        // Drop the art and fall back to the type glyph.
+                        icon.classList.remove('kp-notif-cover');
+                        icon.textContent = '';
+                        var fb = document.createElement('i');
+                        fb.className = n.icon || notifTypeIcon(n.type);
+                        icon.appendChild(fb);
+                    };
+                    icon.appendChild(cover);
+                } else {
+                    var glyph = document.createElement('i');
+                    glyph.className = n.icon || notifTypeIcon(n.type);
+                    icon.appendChild(glyph);
+                }
 
                 var body = document.createElement('div');
                 body.className = 'kp-notif-body';
                 var strong = document.createElement('strong');
                 strong.textContent = n.title;
+                strong.title = n.title;
                 var msg = document.createElement('span');
                 msg.textContent = n.message || ('Ep. ' + n.episode + ' is out!');
+                msg.title = msg.textContent;
                 var time = document.createElement('div');
                 time.className = 'kp-notif-time';
                 time.textContent = timeAgo(n.time);
@@ -1068,10 +1186,20 @@ if (!empty($_SESSION['userID'])) {
             }
 
             function loadNotifications(append) {
-                if (append) notifPage++;
+                if (notifLoading) return;
+                if (append) {
+                    if (notifPage >= notifPages) return;
+                    notifPage++;
+                } else {
+                    // Full refresh resets paging so later pages start from 2.
+                    notifPage = 1;
+                }
+                notifLoading = true;
+                if (notifSentinel) notifSentinel.style.display = append ? 'flex' : 'none';
                 fetch(notifQuery(notifPage))
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
+                        notifLoading = false;
                         var unread = data.unread || 0;
                         notifPages = data.pages || 1;
 
@@ -1115,8 +1243,23 @@ if (!empty($_SESSION['userID'])) {
 
                         if (!notifList) return;
                         var notifs = data.notifications || [];
+                        // An empty page means the server ran out even if it
+                        // claimed more pages — stop the observer here.
+                        if (append && notifs.length === 0) {
+                            notifPages = notifPage;
+                            updateNotifSentinel(false);
+                            return;
+                        }
                         if (append) {
-                            notifs.forEach(function(n) { notifList.appendChild(notifRow(n)); });
+                            // Rows go before the sentinel so the spinner stays last.
+                            var frag = document.createDocumentFragment();
+                            notifs.forEach(function(n) { frag.appendChild(notifRow(n)); });
+                            if (notifSentinel && notifSentinel.parentNode === notifList) {
+                                notifList.insertBefore(frag, notifSentinel);
+                            } else {
+                                notifList.appendChild(frag);
+                                if (notifSentinel) notifList.appendChild(notifSentinel);
+                            }
                         } else if (notifs.length === 0) {
                             var emptyMsg = notifTypeFilter === 'episode'
                                 ? 'No episode alerts yet'
@@ -1125,15 +1268,18 @@ if (!empty($_SESSION['userID'])) {
                                 ? 'Badges, rank-ups and welcome notes land here'
                                 : 'Follow anime to get notified about new episodes';
                             notifList.innerHTML = '<div class="kp-notif-empty"><i class="fas fa-bell-slash"></i><span>' + emptyMsg + '</span><span class="kp-notif-empty-sub">' + emptySub + '</span></div>';
+                            if (notifSentinel) notifList.appendChild(notifSentinel);
                             lastUnreadCount = unread;
-                            updateNotifMore(false);
+                            updateNotifSentinel(false);
                             return;
                         } else {
                             notifList.innerHTML = '';
                             notifs.forEach(function(n) { notifList.appendChild(notifRow(n)); });
+                            if (notifSentinel) notifList.appendChild(notifSentinel);
                         }
-
-                        updateNotifMore(true);
+                        // Show the sentinel only after the rows are in place so
+                        // IntersectionObserver measures the final layout.
+                        updateNotifSentinel(true);
 
                         // Show toast for new notifications
                         if (!append && unread > lastUnreadCount && lastUnreadCount > 0 && document.hidden) {
@@ -1144,22 +1290,40 @@ if (!empty($_SESSION['userID'])) {
                         lastUnreadCount = unread;
                     })
                     .catch(function() {
-                        if (notifList && !append) notifList.innerHTML = '<div class="kp-notif-empty"><i class="fas fa-triangle-exclamation"></i><span>Failed to load</span></div>';
+                        notifLoading = false;
+                        // The page index was bumped before the fetch — put it
+                        // back so the next attempt retries the same page.
+                        if (append) notifPage--;
+                        if (notifList && !append) {
+                            notifList.innerHTML = '<div class="kp-notif-empty"><i class="fas fa-triangle-exclamation"></i><span>Failed to load</span></div>';
+                            if (notifSentinel) notifList.appendChild(notifSentinel);
+                        }
+                        // Stay hidden after an error so a flaky network cannot
+                        // spin the observer in a tight retry loop.
+                        updateNotifSentinel(false);
                     });
             }
 
-            function updateNotifMore(ok) {
-                if (!notifMoreBtn) return;
-                notifMoreBtn.style.display = (ok && notifPage < notifPages) ? 'block' : 'none';
+            function updateNotifSentinel(ok) {
+                if (!notifSentinel) return;
+                var show = ok && notifPage < notifPages;
+                // Drop and re-show so a sentinel that stayed in view during the
+                // fetch still fires IntersectionObserver for the next page.
+                notifSentinel.style.display = 'none';
+                if (show) {
+                    void notifSentinel.offsetHeight;
+                    notifSentinel.style.display = 'flex';
+                }
             }
 
-            if (notifMoreBtn) {
-                notifMoreBtn.addEventListener('click', function(e) {
-                    e.stopPropagation();
-                    notifMoreBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading';
-                    loadNotifications(true);
-                    setTimeout(function() { notifMoreBtn.innerHTML = 'Load more <i class="fas fa-chevron-down"></i>'; }, 600);
-                });
+            // Infinite scroll: the sentinel sits at the foot of the scrolling
+            // list; when it enters view and pages remain, pull the next one.
+            if (notifList && notifSentinel && 'IntersectionObserver' in window) {
+                new IntersectionObserver(function(entries) {
+                    if (entries[0] && entries[0].isIntersecting) {
+                        loadNotifications(true);
+                    }
+                }, { root: notifList, rootMargin: '80px' }).observe(notifSentinel);
             }
 
             // Type filter tabs — switching resets paging and re-fetches.
@@ -1170,7 +1334,6 @@ if (!empty($_SESSION['userID'])) {
                     document.querySelectorAll('#notifTabs .kp-notif-tab').forEach(function(t) { t.classList.remove('is-active'); });
                     tab.classList.add('is-active');
                     notifTypeFilter = tab.dataset.type;
-                    notifPage = 1;
                     loadNotifications(false);
                 });
             });
@@ -1201,12 +1364,18 @@ if (!empty($_SESSION['userID'])) {
                     // Destructive and irreversible, so it always asks first.
                     if (!window.confirm('Remove every notification? This cannot be undone.')) return;
 
-                    if (notifList) notifList.innerHTML = '<div class="kp-notif-empty"><i class="fas fa-bell-slash"></i><span>No notifications yet</span><span class="kp-notif-empty-sub">Follow anime to get notified about new episodes</span></div>';
+                    if (notifList) {
+                        notifList.innerHTML = '<div class="kp-notif-empty"><i class="fas fa-bell-slash"></i><span>No notifications yet</span><span class="kp-notif-empty-sub">Follow anime to get notified about new episodes</span></div>';
+                        if (notifSentinel) notifList.appendChild(notifSentinel);
+                    }
                     if (notifBadge) notifBadge.style.display = 'none';
                     if (notifCountLabel) notifCountLabel.style.display = 'none';
                     if (notifMarkAllBtn) notifMarkAllBtn.style.display = 'none';
                     notifClearAllBtn.style.display = 'none';
                     lastUnreadCount = 0;
+                    notifPage = 1;
+                    notifPages = 1;
+                    updateNotifSentinel(false);
 
                     fetch('./includes/delete_notification.php', {
                         method: 'POST',
@@ -1215,7 +1384,6 @@ if (!empty($_SESSION['userID'])) {
                     }).then(function() {
                         if (typeof kpToast === 'function') kpToast('Notifications cleared', 'success');
                     }).catch(function() {
-                        notifPage = 1;
                         loadNotifications(false);
                     });
                 });

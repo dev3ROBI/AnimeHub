@@ -34,6 +34,7 @@ const ANILIST_MEDIA_FIELDS = <<<'GQL'
     nextAiringEpisode { airingAt episode timeUntilAiring }
     trailer { id site }
     isAdult
+    countryOfOrigin
 GQL;
 
 // ─── Transport ─────────────────────────────────────────────────────────
@@ -82,6 +83,25 @@ function anilist_anilist_from_id($id) {
 }
 
 // ─── Normalization ─────────────────────────────────────────────────────
+
+/** ISO-3166 origin country → ISO-639 spoken-language guess (anime catalog). */
+function anilist_lang_from_origin($country) {
+    $c = strtoupper(trim((string)$country));
+    if ($c === '') return null;
+    if ($c === 'CN' || $c === 'TW' || $c === 'HK') return 'zh';
+    if ($c === 'KR') return 'ko';
+    if ($c === 'JP') return 'ja';
+    if ($c === 'US' || $c === 'GB' || $c === 'CA' || $c === 'AU') return 'en';
+    if ($c === 'FR') return 'fr';
+    if ($c === 'DE' || $c === 'AT' || $c === 'CH') return 'de';
+    if ($c === 'ES') return 'es';
+    if ($c === 'IT') return 'it';
+    if ($c === 'PT' || $c === 'BR') return 'pt';
+    if ($c === 'RU') return 'ru';
+    if ($c === 'IN') return 'hi';
+    if ($c === 'SA' || $c === 'AE' || $c === 'EG') return 'ar';
+    return null;
+}
 
 /**
  * Flatten an AniList Media object into the catalogue's common shape.
@@ -177,6 +197,10 @@ function anilist_normalize($media) {
                                 : null,
         'is_adult'        => !empty($media['isAdult']),
         'has_dub'         => !empty($titles['english']) && (($media['popularity'] ?? 0) > 5000),
+        'country'         => !empty($media['countryOfOrigin']) ? strtoupper((string)$media['countryOfOrigin']) : null,
+        // AniList has no spoken-language field; derive from origin country only
+        // when it is known (JP→ja, CN→zh, KR→ko, …). Missing → N/A.
+        'language'        => anilist_lang_from_origin($media['countryOfOrigin'] ?? null),
         'relations'       => [],
         'recommendations' => [],
         'episodes_list'   => [],

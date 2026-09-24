@@ -105,7 +105,7 @@ if (!empty($user['User_Join'])) {
                     <div class="kp-prof-cover-mosaic">
                         <?php foreach ($coverAnime as $i => $img): ?>
                             <?php /* First tile paints with the page, the rest wait: six eager posters used to fight the LCP image. */ ?>
-                            <img src="<?= htmlspecialchars($img, ENT_QUOTES, 'UTF-8') ?>" alt="" class="kp-prof-cover-img kp-prof-cover-img-<?= $i ?>"<?= kp_img_attrs($img, ['sizes' => '45vw', 'eager' => $i === 0]) ?>>
+                            <img src="<?= htmlspecialchars($img, ENT_QUOTES, 'UTF-8') ?>" alt="" class="kp-prof-cover-img kp-prof-cover-img-<?= $i ?>"<?= kp_img_attrs($img, ['sizes' => '45vw', 'eager' => $i === 0]) ?> onerror="this.onerror=null;this.src='./uploads/thumbnails/default.png'">
                         <?php endforeach; ?>
                     </div>
                     <div class="kp-prof-cover-glass"></div>
@@ -115,7 +115,8 @@ if (!empty($user['User_Join'])) {
                 <div class="kp-prof-avatar-wrap">
                     <img id="prof-avatar" data-kp-avatar-img class="kp-prof-avatar"
                          src="<?= htmlspecialchars($avatarUrl, ENT_QUOTES, 'UTF-8') ?>"
-                         alt="Profile avatar" decoding="async">
+                         alt="Profile avatar" decoding="async"
+                         onerror="this.onerror=null;this.src='./uploads/thumbnails/default.png'">
                     <button type="button" class="kp-prof-avatar-edit" data-kp-avatar-open
                             title="Change anime avatar" aria-label="Change anime avatar">
                         <i class="fas fa-camera"></i>
@@ -124,7 +125,7 @@ if (!empty($user['User_Join'])) {
 
                 <div class="kp-prof-meta">
                     <div class="kp-prof-name-row">
-                        <h1 class="kp-prof-name"><?= htmlspecialchars($user['User_Name']) ?></h1>
+                        <h1 class="kp-prof-name" data-kp-user-name><?= htmlspecialchars($user['User_Name']) ?></h1>
                         <span class="kp-prof-rank"
                               title="Rank: <?= htmlspecialchars($kp_rank['title']) ?> — <?= htmlspecialchars(progress_format_time($kp_rank['seconds'])) ?> watched"
                               style="color:<?= htmlspecialchars($kp_rank['color']) ?>; border-color:<?= htmlspecialchars($kp_rank['color']) ?>59; background:<?= htmlspecialchars($kp_rank['color']) ?>24;">
@@ -413,8 +414,8 @@ foreach ([
                         role="option"
                         title="<?= htmlspecialchars($avatar['name'] . ($avatar['from'] !== '' ? ' — ' . $avatar['from'] : ''), ENT_QUOTES, 'UTF-8') ?>">
                     <img src="<?= htmlspecialchars($avatar['img'], ENT_QUOTES, 'UTF-8') ?>"
-                         alt="<?= htmlspecialchars($avatar['name'], ENT_QUOTES, 'UTF-8') ?>" loading="lazy"
-                         onerror="this.onerror=null;this.src='./uploads/thumbnails/default.png';">
+                         alt="<?= htmlspecialchars($avatar['name'], ENT_QUOTES, 'UTF-8') ?>" loading="lazy" decoding="async"
+                         onerror="this.onerror=null;this.src='./uploads/thumbnails/default.png';this.classList.add('is-loaded');this.closest('.kp-avatar-choice')?.classList.add('is-ready');">
                     <span class="kp-avatar-name"><?= htmlspecialchars($avatar['name'], ENT_QUOTES, 'UTF-8') ?></span>
                 </button>
             <?php endforeach; ?>

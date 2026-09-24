@@ -220,6 +220,9 @@ function reanime_normalize_item($item) {
         'next_airing'     => $nextAiring,
         'trailer'         => null,
         'is_adult'        => !empty($item['is_adult']),
+        // ReAnime exposes no country/language fields → N/A (never hardcode JP).
+        'language'        => null,
+        'country'         => null,
         'relations'       => [],
         'recommendations' => [],
         'episodes_list'   => [],

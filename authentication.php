@@ -150,10 +150,13 @@ if (isset($_SESSION['userID'])) {
 <!-- Popup Modal -->
 <div id="popupModal" class="auth-popup">
     <div class="auth-popup-content">
-        <div class="auth-popup-icon" id="popupIconWrap">
-            <i class="fas fa-check" id="popupIcon"></i>
+        <div class="auth-popup-head">
+            <div class="auth-popup-icon" id="popupIconWrap">
+                <i class="fas fa-check" id="popupIcon"></i>
+            </div>
+            <h3 id="popupTitle">Message</h3>
+            <button type="button" class="auth-popup-close" onclick="hidePopup()" aria-label="Close">&times;</button>
         </div>
-        <h3 id="popupTitle">Message</h3>
         <p id="popupMessage"></p>
         <button class="auth-popup-btn" onclick="hidePopup()">OK</button>
     </div>

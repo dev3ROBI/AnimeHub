@@ -3,10 +3,6 @@ ob_start();
 session_start();
 header('Content-Type: application/json; charset=utf-8');
 
-error_log('[settings] === SAVE REQUEST ===');
-error_log('[settings] POST: ' . json_encode($_POST));
-error_log('[settings] SESSION userID: ' . var_export($_SESSION['userID'] ?? null, true));
-
 include 'db.php';
 
 if (!isset($pdo)) {
@@ -37,7 +33,6 @@ if (!in_array($key, $ALLOWED_KEYS, true)) {
 }
 
 $value = $value ? 1 : 0;
-error_log('[settings] key=' . $key . ' value=' . $value . ' user=' . $user_id);
 
 try {
     // Ensure table exists
@@ -56,21 +51,17 @@ try {
     if (!$check->fetch()) {
         $ins = $pdo->prepare("INSERT INTO user_settings (user_id) VALUES (?)");
         $ins->execute([$user_id]);
-        error_log('[settings] Created row for user ' . $user_id);
     }
 
     // Update
     $stmt = $pdo->prepare("UPDATE user_settings SET {$key} = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?");
     $stmt->execute([$value, $user_id]);
-    $affected = $stmt->rowCount();
-    error_log('[settings] Affected rows: ' . $affected);
 
     // Verify read-back
     $verify = $pdo->prepare("SELECT {$key} FROM user_settings WHERE user_id = ?");
     $verify->execute([$user_id]);
     $row = $verify->fetch(PDO::FETCH_ASSOC);
     $saved = $row ? (int)$row[$key] : 'NOT_FOUND';
-    error_log('[settings] Read-back: ' . $saved);
 
     ob_end_clean();
 
@@ -81,7 +72,7 @@ try {
     }
 } catch (Throwable $e) {
     ob_end_clean();
-    error_log('[settings] EXCEPTION: ' . $e->getMessage());
+    error_log('[settings] save failed: ' . $e->getMessage());
     http_response_code(500);
     echo json_encode(['success' => false, 'message' => $e->getMessage()]);
 }

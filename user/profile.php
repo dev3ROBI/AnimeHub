@@ -162,13 +162,13 @@ $badgesUnlocked = count(array_filter($badges, static fn($b) => !empty($b['unlock
         <div class="kp-panel-head">
             <i class="fas fa-id-card"></i>
             <h3>Account Information</h3>
-            <span class="kp-panel-note">Read-only — contact an admin to change these</span>
+            <span class="kp-panel-note">Email &amp; role are fixed — name &amp; password live in Settings</span>
         </div>
 
         <div class="kp-info-grid">
             <div class="kp-info-item">
                 <span class="kp-info-label"><i class="fas fa-user"></i> Username</span>
-                <span class="kp-info-value"><?= htmlspecialchars($user['User_Name']) ?></span>
+                <span class="kp-info-value" data-kp-user-name><?= htmlspecialchars($user['User_Name']) ?></span>
             </div>
             <div class="kp-info-item">
                 <span class="kp-info-label"><i class="fas fa-envelope"></i> Email</span>
@@ -522,6 +522,6 @@ $badgesUnlocked = count(array_filter($badges, static fn($b) => !empty($b['unlock
 
     <p class="kp-panel-foot">
         <i class="fas fa-circle-info"></i>
-        Want to update your name or password? Use the <strong>Settings</strong> tab, or contact an admin.
+        Want to update your name or password? Head to the <strong>Settings</strong> tab.
     </p>
 </div>

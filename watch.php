@@ -193,8 +193,9 @@ if ($is_api && $anime_data) {
     $director       = $anime_data['studio'] ?: 'N/A';
     $actors         = 'N/A';
     $writer         = 'N/A';
-    $language       = 'JP';
-    $country        = 'Japan';
+    // Real language/country from the provider; unknown → N/A (never hardcode JP).
+    $language       = kp_lang_display($anime_data['language'] ?? '');
+    $country        = kp_country_display($anime_data['country'] ?? '');
     $episodes_total = (int)($anime_data['episodes'] ?: $anime_data['aired_episodes'] ?: 0);
     if ($is_tmdb_tv && !empty($episodes_list)) {
         $season_numbers = array_unique(array_map(fn($e) => (int)($e['season'] ?? 1), $episodes_list));
@@ -437,8 +438,8 @@ if ($is_api && $anime_data) {
     $actors         = $legacy_data['actors'] ?? 'N/A';
     $director       = $legacy_data['director'] ?? 'N/A';
     $writer         = $legacy_data['writer'] ?? 'N/A';
-    $language       = $legacy_data['language'] ?? 'N/A';
-    $country        = $legacy_data['country'] ?? 'N/A';
+    $language       = kp_lang_display($legacy_data['language'] ?? '');
+    $country        = kp_country_display($legacy_data['country'] ?? '');
     $episodes_total = 0;
     $anilist_id     = null;
     $title_logo     = null;
@@ -545,10 +546,10 @@ include_once './includes/header.php';
             <?php if ($is_api): ?>
             <!-- Poster gate: nothing heavy loads until the user presses play. -->
             <div id="kp-gate" class="kp-gate">
-                <img id="kp-gate-bg" class="kp-gate-bg" src="" alt="" aria-hidden="true">
+                <img id="kp-gate-bg" class="kp-gate-bg" src="" alt="" aria-hidden="true" onerror="if(this.src.indexOf('default.png')<0)this.src='./uploads/thumbnails/default.png'">
                 <div class="kp-gate-shade"></div>
                 <div class="kp-gate-body">
-                    <img id="kp-gate-poster" class="kp-gate-poster" src="" alt="">
+                    <img id="kp-gate-poster" class="kp-gate-poster" src="" alt="" onerror="if(this.src.indexOf('default.png')<0)this.src='./uploads/thumbnails/default.png'">
                     <div class="kp-gate-copy">
                         <span class="kp-gate-tag" id="kp-gate-source"><?= kp_e($provider) ?></span>
                         <h3 class="kp-gate-ep" id="kp-gate-ep">Episode <?= (int)$start_episode ?></h3>
@@ -576,7 +577,6 @@ include_once './includes/header.php';
                 <h3>স্ট্রিম লোড হয়নি</h3>
                 <p id="kp-error-text"></p>
                 <button type="button" id="kp-error-retry"><i class="fas fa-redo"></i> আবার চেষ্টা করুন</button>
-                <button type="button" id="kp-error-open-tab" style="margin-left:10px; background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.2); color:#fff; padding:8px 16px; border-radius:8px; cursor:pointer;"><i class="fas fa-external-link-alt"></i> New Tab-এ খুলুন</button>
             </div>
 
             <!-- Auto-play next episode overlay -->
@@ -1099,16 +1099,16 @@ include_once './includes/header.php';
     <div class="movie-details kp-detail-hero">
         <div class="kp-detail-bg" aria-hidden="true">
             <?php if (!empty($banner_url)): ?>
-                <img src="<?= kp_e($banner_url) ?>" alt=""<?= kp_img_attrs($banner_url, ['sizes' => '100vw']) ?>>
+                <img src="<?= kp_e($banner_url) ?>" alt=""<?= kp_img_attrs($banner_url, ['sizes' => '100vw']) ?> onerror="this.onerror=null;this.src='./uploads/thumbnails/default.png'">
             <?php elseif (!empty($poster_url)): ?>
-                <img src="<?= kp_e($poster_url) ?>" alt=""<?= kp_img_attrs($poster_url, ['sizes' => '100vw']) ?>>
+                <img src="<?= kp_e($poster_url) ?>" alt=""<?= kp_img_attrs($poster_url, ['sizes' => '100vw']) ?> onerror="this.onerror=null;this.src='./uploads/thumbnails/default.png'">
             <?php endif; ?>
             <div class="kp-detail-bg-shade"></div>
         </div>
 
         <div class="kp-detail-head">
             <?php if (!empty($title_logo)): ?>
-                <img class="kp-detail-logo" src="<?= kp_e($title_logo) ?>" alt="<?= kp_e($display_title) ?>" decoding="async">
+                <img class="kp-detail-logo" src="<?= kp_e($title_logo) ?>" alt="<?= kp_e($display_title) ?>" decoding="async" onerror="var h=this.nextElementSibling;if(h)h.classList.remove('kp-sr-only');this.remove();">
                 <h2 class="kp-detail-title kp-sr-only"><?= kp_e($display_title) ?></h2>
             <?php else: ?>
                 <h2 class="kp-detail-title"><?= kp_e($display_title) ?></h2>
@@ -1331,6 +1331,9 @@ include_once './includes/header.php';
         let payload = null;          // last resolved stream payload
         let wantResume = true;       // seek to saved progress on next play
         let progressTimer = null;
+        let uiTickTimer = null;       // 1s tick: credit seconds + repaint badge
+        let creditedSeconds = 0;      // engaged seconds credited to watch time
+        let lastCreditAt = 0;         // when the credit window last advanced
         let lastSavedAt = 0;
         const resumeCache = {};
 
@@ -1489,14 +1492,32 @@ include_once './includes/header.php';
         function livePlaySeconds() {
             return playAccum + (playing ? (Date.now() - playStartedAt) / 1000 : 0);
         }
+        /**
+         * Credit engaged time into `creditedSeconds` — the single source of
+         * truth for what gets sent to the server. Runs on every UI tick and
+         * again at each save boundary, so idle stretches and paused time are
+         * never credited (the window is re-anchored whether or not the second
+         * counts) and the first MIN_WATCH_SESSION_MS of a session is dropped.
+         */
+        function creditWatchSeconds() {
+            const now = Date.now();
+            if (lastCreditAt === 0) { lastCreditAt = now; return; }
+            const elapsed = (now - lastCreditAt) / 1000;
+            lastCreditAt = now;
+            if (!playing || !isUserActive()) return;
+            if (sessionStartTime > 0 && (now - sessionStartTime) < MIN_WATCH_SESSION_MS) return;
+            creditedSeconds += elapsed;
+        }
         function beginPlayClock() {
             if (playing) return;
             playing = true;
             playStartedAt = Date.now();
+            lastCreditAt = playStartedAt;
             if (sessionStartTime === 0) sessionStartTime = Date.now();
         }
         function pausePlayClock() {
             if (!playing) return;
+            creditWatchSeconds();   // settle the partial second before stopping
             playAccum += (Date.now() - playStartedAt) / 1000;
             playing = false;
             playStartedAt = 0;
@@ -1505,7 +1526,9 @@ include_once './includes/header.php';
         function resetWatchClock(base) {
             pausePlayClock();
             playAccum = 0;
+            creditedSeconds = 0;
             sentPlaySeconds = 0;
+            lastCreditAt = 0;
             basePosition = Math.max(0, Number(base) || 0);
             sessionStartTime = 0; // Reset session tracking for new episode
         }
@@ -1521,48 +1544,23 @@ include_once './includes/header.php';
         }
 
         /**
-         * Send one heartbeat: the resume position plus the seconds played since
-         * the previous one (the server accumulates those separately, so
-         * rewinding never rewrites history).
+         * Send one heartbeat: the resume position plus the engaged seconds
+         * credited since the previous one (the server accumulates those
+         * separately, so rewinding never rewrites history).
          *
-         * Activity-based tracking: only counts time when user is actively
-         * watching (mouse/keyboard/touch activity within IDLE_TIMEOUT_MS).
-         * Minimum session threshold: first 10s are not counted.
+         * Watch time is credited per-second by creditWatchSeconds() only while
+         * playback is running, the user is active and the session is past the
+         * minimum threshold — so `creditedSeconds` already excludes idle and
+         * paused time and this function just ships the difference.
          */
         function saveProgress(ep, force) {
             if (!KP.userId || !playerActive) return;
 
+            creditWatchSeconds();
             const position = currentEpisodePosition();
-            let delta = Math.round(livePlaySeconds() - sentPlaySeconds);
+            let delta = Math.floor(creditedSeconds - sentPlaySeconds);
             if (delta < 0) delta = 0;
             if (delta > 600) delta = 600;   // a heartbeat is minutes, not hours
-
-            // Anti-idle: don't count time when user is idle
-            if (!force && !isUserActive() && delta > 0) {
-                // User is idle — don't add to watch time, but still save position
-                sentPlaySeconds += delta;
-                lastSavedAt = position;
-                resumeCache[epKey(ep)] = position;
-                // Send position-only heartbeat (watched_seconds=0)
-                const bodyPos = 'video_id=' + encodeURIComponent(progressVideoId(ep))
-                           + '&last_position=' + encodeURIComponent(position.toFixed(2))
-                           + '&watched_seconds=0'
-                           + '&duration=' + encodeURIComponent(Math.round(episodeRuntime));
-                fetch('./includes/save_progress.php', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: bodyPos
-                }).catch(() => {});
-                return;
-            }
-
-            // Minimum session threshold: don't count first 10s
-            if (!force && sessionStartTime > 0) {
-                const sessionMs = Date.now() - sessionStartTime;
-                if (sessionMs < MIN_WATCH_SESSION_MS && delta > 0) {
-                    delta = 0; // Don't count yet
-                }
-            }
 
             if (position <= 0 && delta <= 0) return;
             if (!force && delta < 1 && Math.abs(position - lastSavedAt) < 5) return;
@@ -1596,9 +1594,17 @@ include_once './includes/header.php';
         }
 
         // Ticks while a player is attached — embeds included, which is why this
-        // no longer waits for `art` to exist.
+        // no longer waits for `art` to exist. Two cadences:
+        //   1s  — credit engaged seconds and repaint the episode row badge, so
+        //         the watched clock under the active episode runs in real time
+        //  5s  — ship the heartbeat to the server
         function startProgressLoop(ep) {
             stopProgressLoop();
+            uiTickTimer = setInterval(function () {
+                if (document.visibilityState !== 'visible') return;
+                creditWatchSeconds();
+                markEpisodeProgress(ep, currentEpisodePosition());
+            }, 1000);
             progressTimer = setInterval(function () {
                 if (document.visibilityState !== 'visible') return;
                 saveProgress(ep, false);
@@ -1606,6 +1612,7 @@ include_once './includes/header.php';
         }
         function stopProgressLoop() {
             if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+            if (uiTickTimer) { clearInterval(uiTickTimer); uiTickTimer = null; }
         }
 
         // Always persist the final position, even if the tab is closing.
@@ -2562,7 +2569,12 @@ include_once './includes/header.php';
                 if (has) badge.textContent = formatClock(seconds);
             }
             el.classList.toggle('kp-ep-started', has);
-            el.style.setProperty('--kp-pct', has ? '100%' : '0%');
+            // The underline tracks how far into the episode the user actually is
+            // (the 1s tick feeds it the live playhead, so it grows while playing).
+            const pct = episodeRuntime > 0
+                ? Math.max(0, Math.min(100, (seconds / episodeRuntime) * 100))
+                : (has ? 100 : 0);
+            el.style.setProperty('--kp-pct', pct.toFixed(1) + '%');
         }
 
         /**
@@ -2956,14 +2968,6 @@ include_once './includes/header.php';
                     resolve(currentEp, { autoplay: true, force: true });
                 });
             }
-            const openTabBtn = document.getElementById('kp-error-open-tab');
-            if (openTabBtn) {
-                openTabBtn.addEventListener('click', function () {
-                    if (payload && payload.url) {
-                        window.open(payload.url, '_blank');
-                    }
-                });
-            }
 
             // Resolve in the background so the gate can show the real source and
             // a resume offer, but do not start playback until the user asks.
@@ -3231,9 +3235,10 @@ include_once './includes/header.php';
         });
 
         let legacyLastTime = 0;
+        let legacyLastSentPos = -1;
         let legacySessionStarted = Date.now();
         const LEGACY_MIN_WATCH_MS = 10000; // 10s minimum before counting
-        const saveTime = () => {
+        const saveTime = (force) => {
             if (!art || isNaN(art.currentTime)) return;
             const time = art.currentTime;
             localStorage.setItem(`watch_time_${sharedImdbIdLegacy}`, time);
@@ -3242,10 +3247,13 @@ include_once './includes/header.php';
             const dur = (art.duration && !isNaN(art.duration)) ? Math.round(art.duration) : 0;
             const seekThreshold = dur > 0 ? dur * 0.15 : 30;
             let played = 0;
+            // A hidden tab must not donate its gap to watch time: the window is
+            // re-anchored every save while hidden, so the gap never accumulates.
+            const visible = document.visibilityState === 'visible';
             const delta = time - legacyLastTime;
-            if (delta > 0 && delta < seekThreshold) {
+            if (visible && delta > 0 && delta < seekThreshold) {
                 played = Math.round(delta);
-            } else if (delta > 0) {
+            } else if (visible && delta > seekThreshold) {
                 // Large forward jump = seek, don't count as watch time
                 // but still track the position
             }
@@ -3257,14 +3265,23 @@ include_once './includes/header.php';
                 played = 0; // Don't count yet
             }
 
+            // Nothing moved and nothing to credit → no POST (this used to fire
+            // every 5s forever while the page sat idle or paused).
+            if (!force && played === 0 && time === legacyLastSentPos) return;
+            legacyLastSentPos = time;
+
             fetch('./includes/save_progress.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: `video_id=${encodeURIComponent(sharedImdbIdLegacy)}&last_position=${time.toFixed(2)}&watched_seconds=${played}&duration=${dur}`
             }).catch(() => {});
         };
-        setInterval(saveTime, 5000);
-        window.addEventListener('pagehide', saveTime);
+        setInterval(() => saveTime(false), 5000);
+        window.addEventListener('pagehide', () => saveTime(true));
+        document.addEventListener('visibilitychange', function () {
+            if (document.visibilityState === 'hidden') saveTime(true);
+            else legacyLastTime = art && !isNaN(art.currentTime) ? art.currentTime : legacyLastTime;
+        });
 
         <?php if (!$is_movie): ?>
         const requestedSeasonId = <?= $season_id ?? 'null' ?>;

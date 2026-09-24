@@ -132,6 +132,9 @@ function jikan_normalize($a) {
         'next_airing'     => null,
         'trailer'         => null,
         'is_adult'        => !empty($a['rating']) && stripos($a['rating'], 'Rx') === 0,
+        // MAL/Jikan expose no country/language fields → N/A (never hardcode JP).
+        'language'        => null,
+        'country'         => null,
         'relations'       => [],
         'recommendations' => [],
         'episodes_list'   => [],

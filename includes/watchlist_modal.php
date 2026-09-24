@@ -15,7 +15,7 @@
     <div class="kp-wl-modal">
         <div class="kp-wl-modal-header">
             <h4><i class="fas fa-list-ul"></i> Add to List</h4>
-            <button type="button" class="kp-wl-modal-close" onclick="closeCardWatchlist()"><i class="fas fa-xmark"></i></button>
+            <button type="button" class="kp-wl-modal-close" onclick="closeCardWatchlist()" aria-label="Close">&times;</button>
         </div>
         <ul class="kp-wl-modal-list" id="kpWlList">
             <li data-status="watching" onclick="saveCardWatchlist('watching')"><i class="fas fa-eye"></i> Watching</li>

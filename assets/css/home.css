@@ -121,7 +121,7 @@
   position: relative;
   overflow: hidden;
   border-radius: 12px;
-  background: #111322;
+  background: #1a1a1a;
   aspect-ratio: 2 / 3;
 }
 
@@ -380,8 +380,9 @@
   position: fixed;
   inset: 0;
   z-index: 9999;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
+  background: rgba(0, 0, 0, 0.68);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -396,12 +397,12 @@
 }
 
 .kp-wl-modal {
-  background: #1e1e2e;
+  background: linear-gradient(145deg, #252525, #1e1e1e);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 16px;
-  padding: 20px;
-  width: 260px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+  padding: 0;
+  width: 280px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 46, 99, 0.1);
   transform: translateY(10px) scale(0.95);
   transition: transform 0.25s ease;
   font-family: 'Poppins', sans-serif;
@@ -415,42 +416,54 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 14px;
+  gap: 10px;
+  padding: 14px 14px 14px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .kp-wl-modal-header h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0;
-  font-size: 13px;
-  font-weight: 700;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
   color: #fff;
-  letter-spacing: 1px;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.kp-wl-modal-header h4 i {
+  color: #ff2e63;
 }
 
 .kp-wl-modal-close {
-  width: 28px;
-  height: 28px;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   border: none;
-  background: rgba(255, 255, 255, 0.1);
-  color: #aaa;
-  font-size: 14px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #ccc;
+  font-size: 20px;
+  line-height: 1;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.2s;
+  transition: background 0.2s ease, color 0.2s ease;
 }
 
 .kp-wl-modal-close:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: #ff2e63;
   color: #fff;
 }
 
 .kp-wl-modal-list {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 10px;
 }
 
 .kp-wl-modal-list li {
@@ -484,8 +497,8 @@
 
 .kp-wl-modal-remove {
   display: block;
-  width: 100%;
-  margin-top: 12px;
+  width: calc(100% - 20px);
+  margin: 12px 10px 10px;
   padding: 10px 12px;
   border-radius: 8px;
   border: 1px solid rgba(218, 54, 51, 0.4);
@@ -2066,7 +2079,7 @@
   aspect-ratio: 2 / 3;
   border-radius: 10px;
   overflow: hidden;
-  background: #111322;
+  background: #1a1a1a;
 }
 
 .kp-top10-poster img {
@@ -2306,6 +2319,9 @@
   font-family: 'Poppins', sans-serif;
   cursor: pointer;
   transition: all 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
 }
 
 .kp-trend-tab:hover {
@@ -2611,6 +2627,37 @@
   font-size: 9px;
 }
 
+/* Bigger touch targets on phones so the 3-way switches actually hit. */
+@media (max-width: 768px) {
+  .kp-trend-tabs {
+    padding: 3px;
+    gap: 3px;
+  }
+
+  .kp-trend-tab {
+    padding: 7px 11px;
+    font-size: 10px;
+    min-height: 30px;
+  }
+
+  .kp-up-tabs {
+    max-width: none;
+    flex: 1;
+  }
+
+  .kp-up-tabs .kp-trend-tab {
+    flex: 1;
+    padding: 7px 6px;
+    font-size: 9.5px;
+    min-height: 30px;
+  }
+
+  .kp-sidebar-head {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
+
 /* One pane visible at a time; without JS all three stack (progressive). */
 .kp-up-pane {
   display: none;
@@ -2657,7 +2704,7 @@
   flex: 0 0 auto;
   object-fit: cover;
   border-radius: 8px;
-  background: #111322;
+  background: #1a1a1a;
 }
 
 .kp-side-info {
@@ -2723,11 +2770,16 @@
 .kp-side-air {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   margin-top: 4px;
   font-size: 10.5px;
-  font-weight: 600;
-  color: #9aa0a6;
+  color: #888;
+  font-weight: 500;
+  font-family: 'Poppins', sans-serif;
+}
+
+.kp-side-air-sep {
+  color: #555;
 }
 .kp-side-air i { font-size: 9px; color: #ff2e63; }
 @media (max-width: 640px) {
@@ -2790,7 +2842,7 @@
   flex: 0 0 auto;
   object-fit: cover;
   border-radius: 8px;
-  background: #111322;
+  background: #1a1a1a;
 }
 
 .kp-pulse-info {
@@ -2900,14 +2952,57 @@
 }
 
 @media (max-width: 768px) {
-  .kp-anime-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-    gap: 12px;
+  /*
+   * Mobile home sections: one row of cards, swipe horizontally for the rest
+   * (Top 10 already works this way). Fixed-width children + nowrap keeps a
+   * single row; snap makes the swipe feel native.
+   */
+  .home-main .kp-anime-grid {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    gap: 10px;
+    padding-bottom: 6px;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  .home-main .kp-anime-grid::-webkit-scrollbar {
+    display: none;
+  }
+
+  .home-main .kp-anime-grid > * {
+    flex: 0 0 auto;
+    width: clamp(112px, 34vw, 148px);
+    min-width: 0;
+    scroll-snap-align: start;
+  }
+
+  .home-main .kp-anime-grid .movie-card {
+    width: 100%;
   }
 
   .kp-trend-list {
     grid-template-columns: 1fr;
+  }
+
+  /*
+   * Mobile: defer rendering of off-screen home sections until the user
+   * scrolls them into view (mirrors critical.css so first paint is covered
+   * before this sheet lands). `auto` remembers the real height after the
+   * first render, so the scrollbar stays stable.
+   */
+  .home-main > .kp-section {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 720px;
+  }
+
+  .home-sidebar > .kp-sidebar-card {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 420px;
   }
 }
 
@@ -2921,10 +3016,9 @@
     width: 128px;
   }
 
-  .kp-anime-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 10px;
+  /* Card rails stay single-row horizontal (see the 768px block above). */
+  .home-main .kp-anime-grid > * {
+    width: clamp(108px, 36vw, 140px);
   }
 
   .kp-section-head h2 {
@@ -3092,19 +3186,16 @@
     left: -2px;
   }
 
-  /* Anime grid - fixed sizing for consistency */
-  .kp-anime-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 10px;
-    justify-items: stretch;
+  /* Anime grid — single horizontal row on small screens (see 768px block). */
+  .home-main .kp-anime-grid {
+    justify-items: initial;
   }
 
-  .kp-anime-grid > * {
+  .home-main .kp-anime-grid > * {
     min-width: 0;
   }
 
-  .kp-anime-grid .movie-card {
+  .home-main .kp-anime-grid .movie-card {
     width: 100%;
   }
 
@@ -3250,8 +3341,8 @@
 
 /* --- Very small screens (< 360px) --- */
 @media (max-width: 360px) {
-  .kp-anime-grid {
-    grid-template-columns: repeat(2, 1fr);
+  .home-main .kp-anime-grid > * {
+    width: 100px;
   }
 
   .kp-top10-card {

@@ -71,6 +71,7 @@ function catalog_fill_item($item, $provider = null) {
         'genres' => [], 'studios' => [], 'studio' => null,
         'score' => null, 'rating' => 'N/A', 'popularity' => 0,
         'season' => null, 'year' => null, 'aired' => null,
+        'language' => null, 'country' => null,
         'next_airing' => null, 'trailer' => null, 'is_adult' => false, 'has_dub' => false,
         'relations' => [], 'recommendations' => [], 'episodes_list' => [],
         'external_links' => [],
@@ -575,4 +576,178 @@ function catalog_schedule($tz = 'Asia/Dhaka', $weekOffset = 0) {
     }
 
     return [];
+}
+
+/**
+ * Sidebar Upcoming pool: AniList schedule + unreleased premieres + TMDB
+ * movies/TV. Every dated row carries next_airing.airingAt so
+ * kp_group_upcoming() can split TODAY / NEXT / LATER without guessing.
+ *
+ * Sources:
+ *   - AniList airing schedule (today → +8d) — exact episode timestamps
+ *   - TMDB movie/upcoming + discover — release_date → local noon
+ *   - TMDB tv/airing_today — pinned to midday today when the list row
+ *     omits next_episode_to_air (the endpoint itself means "airs today")
+ *   - TMDB tv/on_the_air — only when a real next air date or future
+ *     premiere date is known (no invented midweek timestamps)
+ *   - AniList NOT_YET_RELEASED — undated / far-future → LATER
+ *
+ * Past timestamps are dropped; first occurrence of an id wins (so the
+ * AniList schedule's soonest airing is kept). The return is stratified so
+ * a busy "today" cannot crowd NEXT/LATER out of the sidebar.
+ *
+ * @param int $limit max rows returned (groups slice further for display)
+ * @return array
+ */
+function catalog_upcoming_feed($limit = 36) {
+    $now = time();
+    $startOfDay = (int)strtotime('today', $now);
+    $items = [];
+    $seen = [];
+
+    $push = function ($item, $ts = 0, $ep = null) use (&$items, &$seen, $startOfDay) {
+        if (!is_array($item) || empty($item['id']) || isset($seen[$item['id']])) return;
+        $ts = (int)$ts;
+        if ($ts > 0 && $ts < $startOfDay) return; // already aired before today
+        if ($ts > 0) {
+            $ep = ($ep === null || $ep === 0) ? ($item['next_airing']['episode'] ?? null) : $ep;
+            $item['next_airing'] = ['airingAt' => $ts, 'episode' => $ep !== null ? (int)$ep : null];
+        } elseif (isset($item['next_airing']['airingAt'])
+            && (int)$item['next_airing']['airingAt'] < $startOfDay) {
+            $item['next_airing'] = null; // stale schedule from normalize()
+        }
+        $seen[$item['id']] = true;
+        $items[] = $item;
+    };
+
+    // Exact anime episode times — 8 days covers TODAY + the full NEXT window.
+    if (ANILIST_ENABLED) {
+        foreach (anilist_schedule($startOfDay, $startOfDay + 8 * 86400, 'Asia/Dhaka') as $bucket) {
+            foreach (($bucket['episodes'] ?? []) as $epItem) {
+                $push($epItem, (int)($epItem['airingAt'] ?? 0), $epItem['episode'] ?? null);
+            }
+        }
+    }
+
+    // Movies: release_date drives TODAY / NEXT / LATER. /movie/upcoming
+    // sometimes returns already-released titles (region quirks), so only
+    // future dates (or undated UPCOMING) enter the pool. Timestamps land at
+    // local noon so a midnight release does not sort above every episode.
+    foreach (tmdb_movie_upcoming(1) as $movie) {
+        $date = (string)($movie['aired'] ?? '');
+        $ts = $date !== '' ? strtotime($date . ' 12:00:00') : 0;
+        if ($ts !== false && $ts >= $startOfDay) {
+            $push($movie, $ts, null); // movies: no EP badge
+        } elseif ($ts === 0 && (($movie['status'] ?? '') === 'NOT_YET_RELEASED' || ($movie['status'] ?? '') === 'UPCOMING')) {
+            $push($movie, 0);
+        }
+    }
+
+    // Discover fallback — /movie/upcoming can lag; pull real future releases.
+    if (function_exists('tmdb_get')) {
+        $discKey = api_cache_key('tmdb_movie', ['upcoming_future', date('Y-m-d', $startOfDay)]);
+        $disc = api_cache_get($discKey);
+        if (!is_array($disc)) {
+            $raw = tmdb_get('/discover/movie', [
+                'page'                   => 1,
+                'language'               => 'en-US',
+                'sort_by'                => 'primary_release_date.asc',
+                'primary_release_date.gte' => date('Y-m-d', $startOfDay),
+                'region'                 => 'US',
+            ]);
+            $disc = [];
+            foreach (($raw['results'] ?? []) as $m) {
+                $n = tmdb_movie_normalize($m);
+                if ($n) $disc[] = $n;
+            }
+            if ($disc) api_cache_set($discKey, 'tmdb_movie', $disc, CACHE_TTL_TMDB_LIST);
+        }
+        foreach ((array)$disc as $movie) {
+            $date = (string)($movie['aired'] ?? '');
+            $ts = $date !== '' ? strtotime($date . ' 12:00:00') : 0;
+            if ($ts !== false && $ts >= $startOfDay) {
+                $push($movie, $ts, null);
+            }
+        }
+    }
+
+    // TV airing today — trust the endpoint's day, pin midday when undated.
+    foreach (tmdb_tv_airing_today(1) as $show) {
+        $ts = (int)($show['next_airing']['airingAt'] ?? 0);
+        if ($ts < $startOfDay) $ts = $startOfDay + 12 * 3600;
+        $push($show, $ts, $show['next_airing']['episode'] ?? null);
+    }
+
+    // On-the-air: only when the next episode or a future premiere is known.
+    foreach (tmdb_tv_on_the_air(1) as $show) {
+        $ts = (int)($show['next_airing']['airingAt'] ?? 0);
+        if ($ts > $startOfDay) {
+            $push($show, $ts, $show['next_airing']['episode'] ?? null);
+            continue;
+        }
+        $premiere = (string)($show['aired'] ?? '');
+        $fts = $premiere !== '' ? strtotime($premiere . ' 12:00:00') : 0;
+        if ($fts !== false && $fts > $now) {
+            $push($show, $fts, null);
+        }
+    }
+
+    // Unreleased titles (premiere pending, often undated) → LATER.
+    if (ANILIST_ENABLED) {
+        foreach (anilist_upcoming_media(16) as $unreleased) {
+            $ts = (int)($unreleased['next_airing']['airingAt'] ?? 0);
+            if ($ts > $now) {
+                $push($unreleased, $ts, $unreleased['next_airing']['episode'] ?? null);
+            } else {
+                $push($unreleased, 0);
+            }
+        }
+    }
+
+    usort($items, function ($a, $b) {
+        $ta = (int)($a['next_airing']['airingAt'] ?? 0) ?: PHP_INT_MAX;
+        $tb = (int)($b['next_airing']['airingAt'] ?? 0) ?: PHP_INT_MAX;
+        return $ta <=> $tb;
+    });
+
+    // Stratified sample: a packed "today" must not push NEXT/LATER off the
+    // list, and movie release-midnight must not crowd out episode rows —
+    // within each window, interleave series then movies.
+    $nextStart = $startOfDay + 86400;
+    $nextEnd   = $startOfDay + 8 * 86400;
+    $windows   = ['today' => [], 'next' => [], 'later' => []];
+    foreach ($items as $item) {
+        $ts = (int)($item['next_airing']['airingAt'] ?? 0);
+        if ($ts >= $startOfDay && $ts < $nextStart) {
+            $windows['today'][] = $item;
+        } elseif ($ts >= $nextStart && $ts < $nextEnd) {
+            $windows['next'][] = $item;
+        } else {
+            $windows['later'][] = $item;
+        }
+    }
+
+    $limit  = max(3, (int)$limit);
+    $perWin = max(3, (int)ceil($limit / 3));
+    $out    = [];
+    foreach ($windows as $rows) {
+        $series = [];
+        $movies = [];
+        foreach ($rows as $item) {
+            $isMovie = strtoupper((string)($item['format'] ?? '')) === 'MOVIE'
+                || ($item['format'] ?? '') === 'Movie'
+                || ($item['content_type'] ?? '') === 'movie';
+            if ($isMovie) $movies[] = $item;
+            else $series[] = $item;
+        }
+        $merged = [];
+        $i = 0;
+        while (count($series) > $i || count($movies) > $i) {
+            if (isset($series[$i])) $merged[] = $series[$i];
+            if (isset($movies[$i])) $merged[] = $movies[$i];
+            $i++;
+        }
+        $out = array_merge($out, array_slice($merged, 0, $perWin));
+    }
+    return array_slice($out, 0, $limit);
 }

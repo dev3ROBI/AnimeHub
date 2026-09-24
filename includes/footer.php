@@ -39,6 +39,11 @@
                     <a href="https://anilist.co" target="_blank" rel="noopener">AniList</a>
                     <a href="https://www.themoviedb.org" target="_blank" rel="noopener">TMDB</a>
                 </div>
+                <!-- Permanent ad-block guide: always reachable from every page -->
+                <button type="button" class="footer-adfree" data-kp-open-adguard>
+                    <i class="fas fa-shield-halved" aria-hidden="true"></i>
+                    <span data-i18n="footer.adfree">How to block ads</span>
+                </button>
             </div>
         </div>
 
@@ -75,6 +80,13 @@
 if (!isset($kp_watchlist_modal_done)) {
     $kp_watchlist_modal_done = true;
     include __DIR__ . '/watchlist_modal.php';
+}
+/*
+ * Global welcome (first-day) + AdGuard modals — one shared copy for every page.
+ */
+if (!isset($kp_global_modals_done)) {
+    $kp_global_modals_done = true;
+    include __DIR__ . '/global_modals.php';
 }
 ?>
     <!-- Footer styles live in assets/css/nav_style.css (see "Site footer"):

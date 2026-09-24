@@ -57,6 +57,71 @@ if (!function_exists('kp_countdown_chip')) {
     }
 }
 
+/** ISO-639-1 language code → display name. Unknown codes pass through. */
+if (!function_exists('kp_language_name')) {
+    function kp_language_name($code) {
+        $code = strtolower(trim((string)$code));
+        if ($code === '') return '';
+        $map = [
+            'en' => 'English', 'ja' => 'Japanese', 'ko' => 'Korean', 'zh' => 'Chinese',
+            'fr' => 'French', 'de' => 'German', 'es' => 'Spanish', 'it' => 'Italian',
+            'pt' => 'Portuguese', 'ru' => 'Russian', 'hi' => 'Hindi', 'ar' => 'Arabic',
+            'tr' => 'Turkish', 'th' => 'Thai', 'vi' => 'Vietnamese', 'id' => 'Indonesian',
+            'ms' => 'Malay', 'tl' => 'Filipino', 'nl' => 'Dutch', 'pl' => 'Polish',
+            'sv' => 'Swedish', 'da' => 'Danish', 'no' => 'Norwegian', 'fi' => 'Finnish',
+            'uk' => 'Ukrainian', 'cs' => 'Czech', 'hu' => 'Hungarian', 'el' => 'Greek',
+            'he' => 'Hebrew', 'fa' => 'Persian', 'bn' => 'Bengali', 'ta' => 'Tamil',
+            'te' => 'Telugu', 'mr' => 'Marathi', 'ml' => 'Malayalam', 'ja-jp' => 'Japanese',
+        ];
+        return $map[$code] ?? strtoupper($code);
+    }
+}
+
+/** ISO-3166-1 country code → display name. Unknown codes pass through. */
+if (!function_exists('kp_country_name')) {
+    function kp_country_name($code) {
+        $code = strtoupper(trim((string)$code));
+        if ($code === '') return '';
+        $map = [
+            'US' => 'United States', 'GB' => 'United Kingdom', 'JP' => 'Japan',
+            'KR' => 'South Korea', 'CN' => 'China', 'TW' => 'Taiwan', 'HK' => 'Hong Kong',
+            'FR' => 'France', 'DE' => 'Germany', 'IT' => 'Italy', 'ES' => 'Spain',
+            'IN' => 'India', 'BR' => 'Brazil', 'CA' => 'Canada', 'AU' => 'Australia',
+            'MX' => 'Mexico', 'RU' => 'Russia', 'TR' => 'Turkey', 'SE' => 'Sweden',
+            'NO' => 'Norway', 'DK' => 'Denmark', 'NL' => 'Netherlands', 'BE' => 'Belgium',
+            'CH' => 'Switzerland', 'AT' => 'Austria', 'PL' => 'Poland', 'CZ' => 'Czech Republic',
+            'PT' => 'Portugal', 'IE' => 'Ireland', 'AR' => 'Argentina', 'CL' => 'Chile',
+            'CO' => 'Colombia', 'NG' => 'Nigeria', 'ZA' => 'South Africa', 'EG' => 'Egypt',
+            'TH' => 'Thailand', 'PH' => 'Philippines', 'ID' => 'Indonesia', 'MY' => 'Malaysia',
+            'SG' => 'Singapore', 'NZ' => 'New Zealand', 'IL' => 'Israel', 'SA' => 'Saudi Arabia',
+            'AE' => 'United Arab Emirates', 'PK' => 'Pakistan', 'BD' => 'Bangladesh',
+            'UA' => 'Ukraine', 'RO' => 'Romania', 'HU' => 'Hungarian', 'GR' => 'Greece',
+            'FI' => 'Finland', 'CZ' => 'Czech Republic',
+        ];
+        return $map[$code] ?? $code;
+    }
+}
+
+/** Prefer a display name for language; fall back to raw value or N/A. */
+if (!function_exists('kp_lang_display')) {
+    function kp_lang_display($raw) {
+        $raw = trim((string)$raw);
+        if ($raw === '' || strcasecmp($raw, 'N/A') === 0) return 'N/A';
+        $named = kp_language_name($raw);
+        return $named !== '' ? $named : 'N/A';
+    }
+}
+
+/** Prefer a display name for country; fall back to raw value or N/A. */
+if (!function_exists('kp_country_display')) {
+    function kp_country_display($raw) {
+        $raw = trim((string)$raw);
+        if ($raw === '' || strcasecmp($raw, 'N/A') === 0) return 'N/A';
+        $named = kp_country_name($raw);
+        return $named !== '' ? $named : 'N/A';
+    }
+}
+
 /**
  * Load user settings from the database.
  * Returns an associative array with defaults for missing keys.
@@ -282,7 +347,7 @@ function render_trend_item(array $item, $rank) {
 
     return <<<HTML
     <a href="{$link}" class="kp-trend-item{$podium}">
-        <div class="kp-trend-bg"><img src="{$bannerEsc}" alt=""{$bannerAttrs}></div>
+        <div class="kp-trend-bg"><img src="{$bannerEsc}" alt=""{$bannerAttrs} onerror="this.onerror=null;this.src='./uploads/thumbnails/default.png'"></div>
         <div class="kp-trend-overlay"></div>
         <span class="kp-trend-rank">{$rank}</span>
         <div class="kp-trend-info">
@@ -438,7 +503,7 @@ function kp_hero_slide_body(array $item, $tag, $logo = null) {
 
     // A logo (hand-picked or TMDB) replaces the text title when we have one.
     $hasLogo  = is_string($logo) && $logo !== '';
-    $logoHtml = $hasLogo ? '<img class="kp-hero-logo" src="' . kp_e($logo) . '" alt="' . $title . '" decoding="async" fetchpriority="low">' : '';
+    $logoHtml = $hasLogo ? '<img class="kp-hero-logo" src="' . kp_e($logo) . '" alt="' . $title . '" decoding="async" fetchpriority="low" onerror="var c=this.parentNode;if(c)c.classList.remove(\'has-logo\');this.remove();">' : '';
     $copyClass = $hasLogo ? 'kp-hero-copy has-logo' : 'kp-hero-copy';
 
     /*
@@ -449,7 +514,7 @@ function kp_hero_slide_body(array $item, $tag, $logo = null) {
     $bgAttrs = kp_img_attrs($bg, ['sizes' => '100vw', 'priority' => true]);
 
     return <<<HTML
-        <img class="kp-hero-bg" src="{$bg}" alt=""{$bgAttrs}>
+        <img class="kp-hero-bg" src="{$bg}" alt=""{$bgAttrs} onerror="this.onerror=null;this.src='./uploads/thumbnails/default.png'">
         <div class="kp-hero-shade"></div>
         <div class="kp-hero-body">
             <div class="{$copyClass}">
@@ -560,9 +625,9 @@ function render_notice($html, $icon = 'fa-solid fa-circle-info') {
 /**
  * Sidebar "Upcoming" rows grouped by arrival day.
  *
- *   today  → air time is later today (or already out within the last 12h)
- *   next   → tomorrow, up to 7 days out
- *   later  → beyond a week (or undated: premiere-pending titles)
+ *   today  → calendar day only (midnight → midnight, no grace into tomorrow)
+ *   next   → tomorrow through +7 days (this window, minus today)
+ *   later  → beyond a week, or undated premiere-pending titles
  *
  * Every group is sorted by air time (undated last), so the list reads as a
  * mini schedule instead of a popularity dump.
@@ -576,8 +641,7 @@ function kp_group_upcoming(array $items, $now = null) {
         if (!is_array($item) || empty($item['id']) || isset($seen[$item['id']])) continue;
         $seen[$item['id']] = true;
         $ts = (int)($item['next_airing']['airingAt'] ?? 0);
-        if ($ts >= $startOfDay && $ts < $startOfDay + 86400 + 43200) {
-            // Later today (grace window covers episodes that just aired).
+        if ($ts >= $startOfDay && $ts < $startOfDay + 86400) {
             $groups['today'][] = $item + ['_ts' => $ts];
         } elseif ($ts >= $startOfDay + 86400 && $ts < $startOfDay + 8 * 86400) {
             $groups['next'][] = $item + ['_ts' => $ts];
@@ -587,6 +651,8 @@ function kp_group_upcoming(array $items, $now = null) {
         }
     }
     foreach ($groups as $key => $rows) {
+        // Chronological within the window. Movie releases land at local noon
+        // (catalog_upcoming_feed) so they never pack above every episode.
         usort($rows, fn($a, $b) => ($a['_ts'] ?: PHP_INT_MAX) <=> ($b['_ts'] ?: PHP_INT_MAX));
         $groups[$key] = $rows;
     }
@@ -607,23 +673,25 @@ function render_upcoming_item(array $item) {
     $airTs    = (int)($item['next_airing']['airingAt'] ?? 0);
     $airEp    = (int)($item['next_airing']['episode'] ?? 0);
 
+    $isMovie = in_array(strtoupper((string)$format), ['MOVIE', 'MOVIE SPECIAL', 'OVA'], true)
+        || ($item['content_type'] ?? '') === 'movie';
+    $epTotal = (int)(($item['episodes'] ?? 0) ?: ($item['aired_episodes'] ?? 0));
+    $epHtml  = (!$isMovie && $epTotal > 0) ? '<span><i class="fas fa-layer-group"></i> ' . $epTotal . '</span>' : '';
+
     // Arrival line: "EP 4 · Fri, 25 Sep" when scheduled, else the premiere
-    // date for not-yet-released titles.
+    // date for not-yet-released titles. Movies skip the EP prefix.
     $airTxt = '';
     if ($airTs > 0) {
-        $airTxt = ($airEp > 0 ? 'EP ' . $airEp . ' · ' : '') . date('D, d M', $airTs);
+        $airTxt = ($airEp > 0 && !$isMovie ? 'EP ' . $airEp . ' · ' : '') . date('D, d M', $airTs);
     } elseif (($item['status'] ?? '') === 'NOT_YET_RELEASED' && !empty($item['aired']) && $item['aired'] !== 'N/A') {
         $airTxt = 'Premieres ' . $item['aired'];
     }
-
-    $epTotal = (int)(($item['episodes'] ?? 0) ?: ($item['aired_episodes'] ?? 0));
-    $epHtml  = $epTotal > 0 ? '<span><i class="fas fa-layer-group"></i> ' . $epTotal . '</span>' : '';
 
     $link    = kp_e(kp_watch_url($item));
     $airHtml = '';
     if ($airTxt !== '') {
         $airHtml = '<div class="kp-side-air"><i class="fas fa-clock"></i><span>' . kp_e($airTxt) . '</span>'
-                 . ($airTs > 0 ? kp_countdown_chip($airTs) : '') . '</div>';
+                 . ($airTs > 0 ? '<span class="kp-side-air-sep">·</span>' . kp_countdown_chip($airTs) : '') . '</div>';
     }
 
     return <<<HTML

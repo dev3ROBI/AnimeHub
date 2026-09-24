@@ -155,6 +155,7 @@
         // slide gets fetched immediately, the rest wait until built.
         bg.loading = 'lazy';
         bg.src = data.b || data.p || '';
+        bg.onerror = function () { this.onerror = null; this.src = './uploads/thumbnails/default.png'; };
 
         const shade = el('div', 'kp-hero-shade');
 

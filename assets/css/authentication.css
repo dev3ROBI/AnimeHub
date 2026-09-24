@@ -423,13 +423,15 @@ input:-webkit-autofill:focus {
 }
 
 .auth-popup-content {
-    background: #292929;
+    position: relative;
+    background: linear-gradient(145deg, #252525, #1e1e1e);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 16px;
-    padding: 28px 24px 20px;
+    padding: 0 0 20px;
     width: 90%;
     max-width: 320px;
-    text-align: center;
+    text-align: left;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 46, 99, 0.1);
     transform: translateY(20px) scale(0.95);
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -438,43 +440,55 @@ input:-webkit-autofill:focus {
     transform: translateY(0) scale(1);
 }
 
+.auth-popup-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 14px 14px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    margin-bottom: 14px;
+}
+
+.auth-popup-head h3 {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #fff;
+}
+
 .auth-popup-icon {
-    width: 52px;
-    height: 52px;
-    margin: 0 auto 14px;
+    flex: 0 0 auto;
+    width: 34px;
+    height: 34px;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 50%;
-    font-size: 22px;
+    border-radius: 10px;
+    font-size: 14px;
     color: #fff;
 }
 
 .auth-popup-icon-success {
     background: linear-gradient(135deg, #238636, #1a7f2e);
-    box-shadow: 0 4px 16px rgba(35, 134, 54, 0.3);
+    box-shadow: 0 4px 14px rgba(35, 134, 54, 0.3);
 }
 
 .auth-popup-icon-error {
     background: linear-gradient(135deg, #da3633, #b62324);
-    box-shadow: 0 4px 16px rgba(218, 54, 51, 0.3);
-}
-
-.auth-popup-content h3 {
-    margin: 0 0 6px;
-    font-size: 18px;
-    font-weight: 700;
-    color: #fff;
+    box-shadow: 0 4px 14px rgba(218, 54, 51, 0.3);
 }
 
 .auth-popup-content p {
-    margin: 0 0 18px;
+    margin: 0 18px 16px;
     font-size: 13px;
     color: #aaa;
     line-height: 1.5;
 }
 
 .auth-popup-btn {
+    margin: 0 18px;
     padding: 9px 28px;
     border: none;
     border-radius: 8px;
@@ -488,22 +502,57 @@ input:-webkit-autofill:focus {
 }
 
 .auth-popup-btn:hover {
-    background: #d91a50;
+    background: #c9184a;
     transform: translateY(-1px);
 }
 
 .auth-popup-close {
-    position: absolute;
-    top: 12px;
-    right: 14px;
+    flex: 0 0 auto;
+    width: 32px;
+    height: 32px;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.07);
+    color: #ccc;
     font-size: 20px;
-    color: #888;
+    line-height: 1;
     cursor: pointer;
-    transition: color 0.2s ease;
+    display: grid;
+    place-items: center;
+    transition: background 0.2s ease, color 0.2s ease;
 }
 
 .auth-popup-close:hover {
-    color: #ff2e63;
+    background: #ff2e63;
+    color: #fff;
+}
+
+[data-theme="light"] .auth-popup-content {
+    background: #fff;
+    border-color: rgba(0, 0, 0, 0.1);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(255, 46, 99, 0.12);
+}
+
+[data-theme="light"] .auth-popup-head {
+    border-bottom-color: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .auth-popup-head h3 {
+    color: #1a1a1a;
+}
+
+[data-theme="light"] .auth-popup-content p {
+    color: #666;
+}
+
+[data-theme="light"] .auth-popup-close {
+    background: rgba(0, 0, 0, 0.06);
+    color: #444;
+}
+
+[data-theme="light"] .auth-popup-close:hover {
+    background: #ff2e63;
+    color: #fff;
 }
 
 /* ─── Responsive ──────────────────────────────────────────────────── */
