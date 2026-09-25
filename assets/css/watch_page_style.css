@@ -869,6 +869,80 @@
   border-color: #6b4fd8;
 }
 
+/* Primary chip = our own player; a touch bolder than the rest. */
+.server-chip-primary {
+  font-weight: 600;
+}
+
+/* "▾ অন্যান্য সার্ভার (N)" toggle — not a server, so it stays out of the
+   .server-chip active-state machinery entirely. */
+.kp-chip-more-btn {
+  padding: 6px 12px;
+  border-radius: 20px;
+  border: 1px dashed #464652;
+  background: #1b1b22;
+  color: #aaa;
+  cursor: pointer;
+  font-size: 0.8em;
+  font-family: 'Poppins', sans-serif;
+  transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.kp-chip-more-btn:hover,
+.kp-chip-more-btn.open {
+  color: #fff;
+  border-color: #6b4fd8;
+  background: #241f36;
+}
+
+.kp-chip-count {
+  display: inline-block;
+  background: #2e2e3a;
+  border-radius: 10px;
+  padding: 0 7px;
+  margin-left: 4px;
+  font-size: 0.92em;
+  line-height: 1.5;
+}
+
+.kp-chip-more-btn.open .kp-chip-count {
+  background: #6b4fd8;
+}
+
+/* Full-width second row; collapsed until the toggle opens it. */
+.kp-chip-more {
+  display: none;
+  width: 100%;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.kp-chip-more.open {
+  display: flex;
+}
+
+/* Site-name watermark — mounted inside the ArtPlayer root so it survives
+   fullscreen. Hidden unless the custom player is actually playing. */
+#kp-watermark {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  z-index: 4;
+  pointer-events: none;
+  user-select: none;
+  font-family: 'Poppins', sans-serif;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.78);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.34);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 7px;
+  padding: 3px 9px;
+}
+
 .kp-chip-label {
   display: inline-flex;
   align-items: center;

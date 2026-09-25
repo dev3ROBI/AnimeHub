@@ -10,7 +10,10 @@
  *      backend needed and independent of the scraper.
  *
  * Every source returns the same payload shape so the player only has one
- * code path per `mode`.
+ * code path per `mode`. On top of that every successful payload carries a
+ * normalized `sources` queue (see stream_attach_sources) — the full ordered
+ * list of fallback candidates the client walks through when playback fails:
+ * primary direct source → other direct servers → embed iframes (last resort).
  */
 
 include_once __DIR__ . '/catalog.php';
@@ -46,7 +49,7 @@ function stream_resolve($info, $episode = 1, $lang = 'sub') {
     // 0 ── Anikuro (its own self-hosted server, when enabled)
     if (($info['provider'] ?? '') === 'anikuro' && ANIKURO_ENABLED) {
         $result = stream_try_anikuro($info, $episode, $lang);
-        if (!empty($result['ok'])) return $result;
+        if (!empty($result['ok'])) return stream_attach_sources($result, $info, $episode, $lang);
         $anikuroError = $result['message'] ?? null;
     } else {
         $anikuroError = null;
@@ -55,7 +58,7 @@ function stream_resolve($info, $episode = 1, $lang = 'sub') {
     // 1 ── self-hosted scraper
     if (STREAM_TRY_SCRAPER && REANIME_ENABLED) {
         $result = stream_try_scraper($info, $episode, $lang);
-        if (!empty($result['ok'])) return $result;
+        if (!empty($result['ok'])) return stream_attach_sources($result, $info, $episode, $lang);
         $scraperError = $result['message'] ?? null;
     } else {
         $scraperError = null;
@@ -66,7 +69,7 @@ function stream_resolve($info, $episode = 1, $lang = 'sub') {
         $result = stream_embed_payload($info, $episode, $lang);
         if (!empty($result['ok'])) {
             if ($scraperError) $result['scraper_error'] = $scraperError;
-            return $result;
+            return stream_attach_sources($result, $info, $episode, $lang);
         }
     }
 
@@ -87,6 +90,7 @@ function stream_failure($message, $episode, $lang) {
         'lang'      => $lang,
         'episode'   => $episode,
         'servers'   => [],
+        'sources'   => [],
         'subtitles' => [],
         'intro'     => null,
         'outro'     => null,
@@ -154,6 +158,7 @@ function stream_try_anikuro($info, $episode, $lang) {
         'lang'       => $servers[0]['lang'],
         'episode'    => $episode,
         'servers'    => $servers,
+        'server_key' => $servers[0]['key'],
         'subtitles'  => stream_normalize_subtitles($data['subtitles'] ?? []),
         'intro'      => stream_chapter($data['intro_chapter'] ?? null),
         'outro'      => stream_chapter($data['outro_chapter'] ?? null),
@@ -214,6 +219,16 @@ function stream_try_scraper($info, $episode, $lang) {
         return stream_failure('Could not decrypt the stream. The source may have rotated its keys.', $episode, $lang);
     }
 
+    // Stamp the decrypted URL onto the server that actually resolved it, so
+    // the client queue can dedupe the primary source against this chip and
+    // re-play it without paying for a second decrypt.
+    foreach ($servers as $i => $candidate) {
+        if (($candidate['key'] ?? '') === ($first['key'] ?? '')) {
+            $servers[$i]['url'] = $stream['url'];
+            break;
+        }
+    }
+
     return [
         'ok'         => true,
         'mode'       => 'hls',
@@ -221,6 +236,7 @@ function stream_try_scraper($info, $episode, $lang) {
         'lang'       => $first['lang'] ?? $lang,
         'episode'    => $episode,
         'servers'    => $servers,
+        'server_key' => $first['key'] ?? ($servers[0]['key'] ?? null),
         'subtitles'  => stream_normalize_subtitles($stream['subtitles'] ?? []),
         'intro'      => stream_chapter($stream['intro_chapter'] ?? null),
         'outro'      => stream_chapter($stream['outro_chapter'] ?? null),
@@ -321,6 +337,31 @@ function stream_chapter($chapter) {
     ];
 }
 
+// ─── Anime: resolver-backed NHD server ────────────────────────────────
+
+/**
+ * The NHD anime server for one episode — an embed URL our level-1 resolver
+ * turns into a real HLS/mp4 stream inside our own player.
+ *
+ * NHD keys its anime pages by AniList id (verified: /anime/{anilist}/ep —
+ * MAL/TMDB ids land on an empty "Player" shell), so the caller passes the
+ * id it already resolved for the embed list. Returns null without one.
+ */
+function stream_nhd_anime_server($anilistId, $episode) {
+    $anilistId = (int)$anilistId;
+    if ($anilistId <= 0) return null;
+
+    return [
+        'key'      => 'nhd-anime',
+        'label'    => 'Auto HD',
+        'lang'     => 'any',
+        'mode'     => 'embed',
+        'url'      => 'https://nhdapi.com/anime/' . $anilistId . '/' . (int)$episode,
+        'dataLink' => null,
+        'primary'  => true,
+    ];
+}
+
 // ─── Attempt 2: embed players ──────────────────────────────────────────
 
 /**
@@ -354,6 +395,7 @@ function stream_embed_payload($info, $episode, $lang) {
         'lang'       => $lang,
         'episode'    => $episode,
         'servers'    => $servers,
+        'server_key' => $pick['key'],
         'subtitles'  => [],
         'intro'      => null,
         'outro'      => null,
@@ -363,7 +405,14 @@ function stream_embed_payload($info, $episode, $lang) {
     ];
 }
 
-function stream_embed_servers($info, $episode, $lang) {
+/**
+ * @param bool $healthCheck Run the HEAD-request health filter. Set false when
+ *                          these embeds are only a fallback appended behind a
+ *                          source that already resolved — the browser is the
+ *                          real health check there, and a HEAD round-trip
+ *                          per provider would stall every successful resolve.
+ */
+function stream_embed_servers($info, $episode, $lang, $healthCheck = true) {
     $anilistId = !empty($info['anilist_id']) ? (int)$info['anilist_id'] : 0;
     $malId = !empty($info['mal_id']) ? (int)$info['mal_id'] : 0;
 
@@ -374,7 +423,13 @@ function stream_embed_servers($info, $episode, $lang) {
     }
     if ($anilistId <= 0) return [];
 
+    // NHD leads the list: its URL resolves through our own player instead of
+    // an iframe. Marked primary so it also wins the pick when this list is
+    // the whole payload, and so the health filter below never drops it.
     $out = [];
+    $nhd = stream_nhd_anime_server($anilistId, $episode);
+    if ($nhd) $out[] = $nhd;
+
     foreach (embed_providers() as $key => $provider) {
         $url = (string)($provider['url'] ?? '');
         if ($url === '') continue;
@@ -398,11 +453,132 @@ function stream_embed_servers($info, $episode, $lang) {
         ];
     }
 
-    $out = stream_filter_active_embeds($out);
+    if ($healthCheck) {
+        $out = stream_filter_active_embeds($out);
+    }
 
     usort($out, fn($a, $b) => (int)!empty($b['primary']) <=> (int)!empty($a['primary']));
 
     return $out;
+}
+
+// ─── Normalized source queue ──────────────────────────────────────────
+
+/**
+ * Build the ordered fallback queue for one resolved payload.
+ *
+ * Entry shape — identical for every provider so the client walks one list:
+ *   {type, mode, url, dataLink, provider, key, label, lang, headers,
+ *    expires_at, subtitles, intro, outro}
+ *
+ * `type` and `mode` carry the same value ('hls' | 'embed'); `type` is the
+ * queue vocabulary, `mode` kept so existing client checks still work.
+ *
+ * Order: primary source → other direct servers → embed iframes (last
+ * resort, built without HEAD health checks — behind a source that already
+ * resolved the browser itself is the real health check, and a per-provider
+ * HEAD round-trip would stall every successful resolve).
+ */
+function stream_build_sources($payload, $info, $episode, $lang) {
+    if (empty($payload['ok']) || empty($payload['url'])) return [];
+
+    $mode     = $payload['mode'] ?? 'embed';
+    $servers  = is_array($payload['servers'] ?? null) ? $payload['servers'] : [];
+    $primaryKey = $payload['server_key'] ?? null;
+
+    // Inherit label/provider from the server chip the primary came from.
+    $label    = $payload['source'] ?? 'Primary';
+    $provider = null;
+    foreach ($servers as $server) {
+        if (($server['key'] ?? '') === $primaryKey) {
+            $label    = $server['label'] ?? $label;
+            $provider = $server['provider'] ?? null;
+            break;
+        }
+    }
+
+    $sources    = [];
+    $seenUrls   = [];
+    $seenLinks  = [];
+    $push = function (array $entry) use (&$sources, &$seenUrls, &$seenLinks) {
+        $u = (string)($entry['url'] ?? '');
+        $d = (string)($entry['dataLink'] ?? '');
+        if ($u !== '') {
+            if (isset($seenUrls[$u])) return;
+            $seenUrls[$u] = true;
+        }
+        if ($d !== '') {
+            if (isset($seenLinks[$d])) return;
+            $seenLinks[$d] = true;
+        }
+        $sources[] = $entry;
+    };
+
+    // 1 ── primary (the payload's own playable URL)
+    $push([
+        'type'       => $mode,
+        'mode'       => $mode,
+        'url'        => (string)$payload['url'],
+        'dataLink'   => null,
+        'provider'   => $provider,
+        'key'        => $primaryKey ?: 'primary',
+        'label'      => $label,
+        'lang'       => $payload['lang'] ?? $lang,
+        'headers'    => null,
+        'expires_at' => null,
+        'subtitles'  => $payload['subtitles'] ?? [],
+        'intro'      => $payload['intro'] ?? null,
+        'outro'      => $payload['outro'] ?? null,
+    ]);
+
+    // 2 ── every other server the payload offers
+    foreach ($servers as $server) {
+        if (($server['key'] ?? '') === $primaryKey) continue;
+        $push([
+            'type'       => $server['mode'] ?? 'hls',
+            'mode'       => $server['mode'] ?? 'hls',
+            'url'        => (string)($server['url'] ?? ''),
+            'dataLink'   => $server['dataLink'] ?? null,
+            'provider'   => $server['provider'] ?? null,
+            'key'        => $server['key'] ?? null,
+            'label'      => $server['label'] ?? null,
+            'lang'       => $server['lang'] ?? 'any',
+            'headers'    => null,
+            'expires_at' => null,
+            'subtitles'  => [],
+            'intro'      => null,
+            'outro'      => null,
+        ]);
+    }
+
+    // 3 ── embed iframes as the last resort behind a direct source
+    if ($mode === 'hls' && STREAM_TRY_EMBEDS) {
+        foreach (stream_embed_servers($info, $episode, $lang, false) as $server) {
+            $push([
+                'type'       => 'embed',
+                'mode'       => 'embed',
+                'url'        => (string)($server['url'] ?? ''),
+                'dataLink'   => null,
+                'provider'   => 'embed',
+                'key'        => $server['key'] ?? null,
+                'label'      => $server['label'] ?? null,
+                'lang'       => $server['lang'] ?? 'any',
+                'headers'    => null,
+                'expires_at' => null,
+                'subtitles'  => [],
+                'intro'      => null,
+                'outro'      => null,
+            ]);
+        }
+    }
+
+    return $sources;
+}
+
+/** Attach the normalized queue to a payload and return it. */
+function stream_attach_sources($payload, $info, $episode, $lang) {
+    $payload['sources'] = stream_build_sources($payload, $info, $episode, $lang);
+    return $payload;
 }
 
 // ─── Embed health-check ──────────────────────────────────────────────

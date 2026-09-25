@@ -1,0 +1,3 @@
+# Local secrets — never commit. Rotate any key that ever lived in git history.
+/config/config.local.php
+/.env

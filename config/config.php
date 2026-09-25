@@ -6,7 +6,15 @@
  * anikuro_api.php) includes this file first, so the constants below always
  * win. Each definition is guarded with `if (!defined(...))` so a caller can
  * override a value before including this file.
+ *
+ * Secrets (TMDB keys, DB passwords, …) belong in config/config.local.php,
+ * which is gitignored and loaded here first — never put them in this file.
  */
+$kp_local_config = __DIR__ . '/config.local.php';
+if (is_file($kp_local_config)) {
+    require_once $kp_local_config;
+}
+unset($kp_local_config);
 
 // ─── Database ──────────────────────────────────────────────────────────
 if (!defined('DB_HOST')) define('DB_HOST', 'localhost');
@@ -27,11 +35,14 @@ if (!defined('ANIKURO_ENABLED'))  define('ANIKURO_ENABLED', false);
 // transparent logo PNG/SVG. Without a key (or with TMDB_DISABLED) the slider
 // simply keeps its styled text title — nothing else changes.
 // Free key: https://www.themoviedb.org/settings/api
+//
+// Real keys live in config/config.local.php (gitignored) or the server
+// environment — the defaults here are empty so nothing secret is committed.
 if (!defined('TMDB_ENABLED'))       define('TMDB_ENABLED', true);
-// v3 api key (34 chars). Paste it here — not inside includes/tmdb_api.php.
-if (!defined('TMDB_API_KEY'))       define('TMDB_API_KEY', '4343034868a20a38c503cc0d3be89ec0');
+// v3 api key (34 chars).
+if (!defined('TMDB_API_KEY'))       define('TMDB_API_KEY', getenv('TMDB_API_KEY') ?: '');
 // v4 read access token (optional). When both are set the bearer token wins.
-if (!defined('TMDB_ACCESS_TOKEN'))  define('TMDB_ACCESS_TOKEN', 'eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiI0MzQzMDM0ODY4YTIwYTM4YzUwM2NjMGQzYmU4OWVjMCIsIm5iZiI6MTc5MDAwNjc2OS4wNjYsInN1YiI6IjZhYjE1NWYxZWYyZDJjMDA2N2Y2Njg5NiIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.311fzT2nMQr6tUATSJlIMtmt_yZ3JrTO0fKhv6ZYbS4');
+if (!defined('TMDB_ACCESS_TOKEN'))  define('TMDB_ACCESS_TOKEN', getenv('TMDB_ACCESS_TOKEN') ?: '');
 if (!defined('TMDB_BASE_URL'))      define('TMDB_BASE_URL', 'https://api.themoviedb.org/3');
 if (!defined('TMDB_IMAGE_BASE'))    define('TMDB_IMAGE_BASE', 'https://image.tmdb.org/t/p/w500');
 if (!defined('CACHE_TTL_LOGO'))     define('CACHE_TTL_LOGO', 604800); // 7 days
@@ -86,6 +97,41 @@ if (!defined('STREAM_TRY_SCRAPER')) define('STREAM_TRY_SCRAPER', true);
 if (!defined('STREAM_TRY_EMBEDS'))  define('STREAM_TRY_EMBEDS', true);
 if (!defined('STREAM_SCRAPER_TIMEOUT')) define('STREAM_SCRAPER_TIMEOUT', 45);
 
+// ─── Embed-source resolver (Level 1) ───────────────────────────────────
+// Turn a supported embed-server URL into a directly playable media URL
+// (hls/mp4) that the ArtPlayer can run natively. Unsupported or blocked
+// providers keep the existing iframe fallback — nothing is proxied.
+// Resolver walks a provider's whole server list until one verifies, so the
+// budget covers several attempts — the client waits RESOLVER_TIMEOUT + 4s.
+if (!defined('RESOLVER_ENABLED'))  define('RESOLVER_ENABLED', true);
+if (!defined('RESOLVER_TIMEOUT'))  define('RESOLVER_TIMEOUT', 12);   // seconds, per resolve()
+if (!defined('RESOLVER_CACHE_TTL')) define('RESOLVER_CACHE_TTL', 60);
+if (!defined('RESOLVER_MAX_ATTEMPTS')) define('RESOLVER_MAX_ATTEMPTS', 3); // Level-1 cap
+
+/**
+ * Hosts the resolver endpoint is allowed to touch (exact match, https only).
+ * Anything not listed here is rejected before a single byte leaves the box,
+ * so the endpoint can never be used as a general-purpose proxy.
+ *
+ * vidzen.fun + movish.to sit here because they are the JSON backends the
+ * vidcore.org player itself queries (VidCore's resolver only ever calls the
+ * provider's own APIs) — and the client mirrors this list to decide which
+ * embed chips may attempt a resolve.
+ *
+ * AniXo was probed and deliberately left out: its m3u8 relay answers only
+ * with Referer: anixo.buzz, so a URL extracted here would 403 in the
+ * browser — that chip keeps its iframe (same for the CF-blocked VidPlus
+ * and the obfuscated VidSrc/VidFast/VidLink/2Embed mirrors).
+ */
+if (!isset($GLOBALS['RESOLVER_ALLOWLIST'])) {
+    $GLOBALS['RESOLVER_ALLOWLIST'] = [
+        'nhdapi.com'  => 'nhdapi',
+        'vidcore.org' => 'vidcore',
+        'vidzen.fun'  => 'vidcore',
+        'movish.to'   => 'vidcore',
+    ];
+}
+
 /**
  * Embed players used as the streaming fallback, in priority order.
  *
@@ -121,11 +167,8 @@ $GLOBALS['KITSUPLAY_EMBED_PROVIDERS'] = [
         'url'     => 'https://player.vidplus.to/embed/anime/{anilist}/{ep}?dub={dub}',
         'lang'    => true,
     ],
-    'megavid' => [
-        'label'   => 'Megavid',
-        'url'     => 'https://megavid.buzz/embed/ani/{anilist}/{ep}/{lang}',
-        'lang'    => true,
-    ],
+    // Megavid (megavid.buzz) removed — the host answers 404, the chip would
+    // only ever render a broken iframe.
     'anilink' => [
         'label'   => 'AniLink',
         'url'     => 'https://anilink.cc/watch/{anilist}/{ep}?variant={lang}',
@@ -175,8 +218,8 @@ if (!function_exists('catalog_order')) {
 // ─── Movie embed providers (fallback chain) ──────────────────────────
 if (!isset($GLOBALS['MOVIE_EMBED_PROVIDERS'])) {
     $GLOBALS['MOVIE_EMBED_PROVIDERS'] = [
-        // === Priority: NHD first ===
-        'nhdapi'       => ['label' => 'NHD',        'url' => 'https://nhdapi.com/movie/{tmdb}'],
+        // === Priority: Auto HD (nhdapi) first ===
+        'nhdapi'       => ['label' => 'Auto HD',    'url' => 'https://nhdapi.com/movie/{tmdb}'],
         // === Then VidFast/VidLink ===
         'vidfast'      => ['label' => 'VidFast',    'url' => 'https://vidfast.pro/movie/{tmdb}?autoPlay=true'],
         'vidlink'      => ['label' => 'VidLink',    'url' => 'https://vidlink.pro/movie/{tmdb}'],
@@ -195,8 +238,8 @@ if (!isset($GLOBALS['MOVIE_EMBED_PROVIDERS'])) {
 // ─── TV embed providers (fallback chain) ─────────────────────────────
 if (!isset($GLOBALS['TV_EMBED_PROVIDERS'])) {
     $GLOBALS['TV_EMBED_PROVIDERS'] = [
-        // === Priority: NHD first ===
-        'nhdapi'       => ['label' => 'NHD',        'url' => 'https://nhdapi.com/tv/{tmdb}/{season}/{episode}'],
+        // === Priority: Auto HD (nhdapi) first ===
+        'nhdapi'       => ['label' => 'Auto HD',    'url' => 'https://nhdapi.com/tv/{tmdb}/{season}/{episode}'],
         // === Then VidFast/VidLink ===
         'vidfast'      => ['label' => 'VidFast',    'url' => 'https://vidfast.pro/tv/{tmdb}/{season}/{episode}?autoPlay=true'],
         'vidlink'      => ['label' => 'VidLink',    'url' => 'https://vidlink.pro/tv/{tmdb}/{season}/{episode}'],

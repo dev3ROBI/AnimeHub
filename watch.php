@@ -1270,6 +1270,13 @@ include_once './includes/header.php';
                 fn($p) => ['label' => $p['label'] ?? '', 'url' => $p['url'] ?? ''],
                 $is_tmdb_movie ? ($GLOBALS['MOVIE_EMBED_PROVIDERS'] ?? []) : ($GLOBALS['TV_EMBED_PROVIDERS'] ?? [])
             ), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) ?>,
+            // Level-1 resolver: which embed hosts the server may resolve for
+            // us (mirrors RESOLVER_ALLOWLIST). Everything else goes straight
+            // to the iframe without a wasted round trip.
+            resolverEnabled: <?= (defined('RESOLVER_ENABLED') && RESOLVER_ENABLED) ? 'true' : 'false' ?>,
+            resolverHosts: <?= json_encode(array_keys($GLOBALS['RESOLVER_ALLOWLIST'] ?? []), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) ?>,
+            resolverTimeout: <?= (int)((defined('RESOLVER_TIMEOUT') ? RESOLVER_TIMEOUT : 8) + 4) ?>,
+            resolverMax: <?= (int)(defined('RESOLVER_MAX_ATTEMPTS') ? RESOLVER_MAX_ATTEMPTS : 3) ?>,
             // Settings > Preferences (header.php loads $kp_settings for the
             // signed-in user; the default keeps auto-play on when it is absent).
             autoplayNext: <?= !empty($kp_settings['autoplay']) ? 'true' : 'false' ?>,
@@ -1329,6 +1336,18 @@ include_once './includes/header.php';
         let currentMode = KP.lang;     // 'sub' or 'dub'
         let lastServers = [];
         let payload = null;          // last resolved stream payload
+        // ─── Source queue (resolver → auto-fallback) ──────────────
+        // payload.sources is the server-built, ordered list of candidates;
+        // sourceIdx is the entry currently being attempted and playToken
+        // identifies that attempt. Every async failure callback carries the
+        // token it was created with, so results from a dead attempt (episode
+        // switch, chip click, an earlier source already failed) go quiet
+        // instead of walking the queue twice.
+        let sourceQueue = [];
+        let sourceIdx = -1;
+        let playToken = 0;
+        let attemptResume = 0;       // position to keep when auto-advancing
+        let sourceWatchdog = null;   // startup watchdog for the active attempt
         let wantResume = true;       // seek to saved progress on next play
         let progressTimer = null;
         let uiTickTimer = null;       // 1s tick: credit seconds + repaint badge
@@ -1440,6 +1459,7 @@ include_once './includes/header.php';
             // stay accumulated — switching servers must not lose them.
             pausePlayClock();
             playerActive = false;
+            if (sourceWatchdog) { clearTimeout(sourceWatchdog); sourceWatchdog = null; }
             if (art) { try { art.destroy(); } catch (e) {} art = null; }
             if (embedFrame) { embedFrame.onload = null; embedFrame.src = 'about:blank'; }
             if (embedBox) embedBox.style.display = 'none';
@@ -1460,6 +1480,10 @@ include_once './includes/header.php';
             toggle(gateEl, state === 'gate');
             toggle(loadingEl, state === 'loading');
             toggle(errorEl, state === 'error');
+
+            // Watermark is ours only while our own player is on screen.
+            var wm = document.getElementById('kp-watermark');
+            if (wm) wm.style.display = (state === 'playing') ? 'block' : 'none';
 
             if (state === 'error' && errorText) {
                 errorText.textContent = opts.message || 'অজানা সমস্যা হয়েছে।';
@@ -1770,18 +1794,27 @@ include_once './includes/header.php';
         }
 
         // ─── HLS playback via Artplayer ─────────────────────────────
-        function playHls(url, subtitles, intro, outro, resumeAt) {
+        // `token` identifies this attempt: every failure path below reports
+        // through handleSourceFailure(token, …), which ignores callbacks that
+        // belong to an attempt the user already navigated away from.
+        function playHls(url, subtitles, intro, outro, resumeAt, token, typeOverride) {
+            if (token == null) token = playToken;
             hideStatus();
             destroyPlayers();
 
-            if (!artBox) return;
+            if (!artBox) { handleSourceFailure(token, 'no-player-box'); return; }
             artBox.style.display = 'block';
             setState('loading', { message: 'প্লেয়ার শুরু হচ্ছে…' });
+
+            // Direct mp4 links must not be fed to hls.js — it would fail on
+            // them and burn a fallback step that was never needed. A resolved
+            // source knows its own type, so that wins over the URL sniff.
+            const mediaType = typeOverride || (/\.mp4(\?|#|$)/i.test(url) ? 'mp4' : 'm3u8');
 
             art = new Artplayer({
                 container: '#artplayer',
                 url: url,
-                type: 'm3u8',
+                type: mediaType,
                 volume: 0.6,
                 autoplay: true,
                 fullscreen: true,
@@ -1800,14 +1833,17 @@ include_once './includes/header.php';
                     m3u8: function (video, src) {
                         if (window.Hls && Hls.isSupported()) {
                             const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+                            hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, function () {
+                                if (!art) return;
+                                art.hlsInstance = hls;
+                                addAudioTrackSetting(art, hls);
+                            });
                             hls.loadSource(src);
                             hls.attachMedia(video);
                             hls.on(Hls.Events.MANIFEST_PARSED, function () { video.play().catch(function () {}); });
                             hls.on(Hls.Events.ERROR, function (_e, data) {
                                 if (data && data.fatal) {
-                                    setState('error', {
-                                        message: 'প্লেব্যাক এরর (' + data.type + '/' + data.details + ')। নিচ থেকে অন্য সার্ভার বেছে নিন বা আবার চেষ্টা করুন।'
-                                    });
+                                    handleSourceFailure(token, 'hls:' + data.type + '/' + data.details);
                                 }
                             });
                             art.on('destroy', function () { try { hls.destroy(); } catch (e) {} });
@@ -1815,16 +1851,27 @@ include_once './includes/header.php';
                             video.src = src;
                             video.addEventListener('loadedmetadata', function () { video.play().catch(function () {}); });
                         } else {
-                            showStatus('<i class="fas fa-exclamation-triangle"></i> এই ব্রাউজারে HLS সাপোর্ট নেই।', true);
+                            handleSourceFailure(token, 'hls-unsupported');
                         }
                     }
                 }
             });
 
+            mountWatermark(art);
+
+            // Nothing rendered in 20s (dead manifest, blank player) → next source.
+            sourceWatchdog = setTimeout(function () {
+                if (token !== playToken) return;
+                handleSourceFailure(token, 'startup-timeout');
+            }, 20000);
+
             // A player is attached: leave the loading state and start saving.
             art.once('ready', function () {
+                if (sourceWatchdog) { clearTimeout(sourceWatchdog); sourceWatchdog = null; }
                 setState('playing');
                 playerActive = true;
+                addPlayerSettings(art);
+                if (art.hlsInstance) addAudioTrackSetting(art, art.hlsInstance);
                 // The real file duration beats the catalogue estimate.
                 if (art.duration && art.duration > 0) {
                     episodeRuntime = Math.round(art.duration);
@@ -1840,6 +1887,16 @@ include_once './includes/header.php';
             art.on('video:pause', pausePlayClock);
             art.on('video:ended', pausePlayClock);
             art.on('video:waiting', pausePlayClock);
+            // A load that dies after attach (expired CDN token, network drop)
+            // has no fatal hls event to lean on — fall through the queue here.
+            // Bound natively: destroy() tears the element down while other
+            // events can still fire, and the token check makes those quiet.
+            var vid = art.video || art.$video;
+            if (vid && vid.addEventListener) {
+                vid.addEventListener('error', function () {
+                    if (this.error) handleSourceFailure(token, 'video-error:' + this.error.code);
+                });
+            }
 
             // Resume where the user left off (needs duration, so wait for metadata).
             if (resumeAt && resumeAt > 10) {
@@ -1985,29 +2042,33 @@ include_once './includes/header.php';
         }
 
         // ─── Embed fallback playback ────────────────────────────────
-        function playEmbed(url) {
+        // Cross-origin: the inner video's own failures are unreadable, so the
+        // only signals available here are onload/onerror and the load watchdog.
+        function playEmbed(url, token) {
+            if (token == null) token = playToken;
             hideStatus();
             destroyPlayers();
             if (artBox) artBox.style.display = 'none';
             if (embedBox) embedBox.style.display = 'block';
             setState('loading', { message: 'সার্ভার লোড হচ্ছে…' });
 
-            if (!embedFrame) return;
+            if (!embedFrame) { handleSourceFailure(token, 'no-embed-frame'); return; }
             if (!url || url === 'about:blank' || url === 'null' || url === '') {
-                setState('error', { message: 'No embed URL found. Try a different server below.' });
+                handleSourceFailure(token, 'missing-embed-url');
                 return;
             }
 
             console.log('[KP] playEmbed loading:', url);
             let settled = false;
             const watchdog = setTimeout(function () {
-                if (settled) return;
-                setState('error', { message: 'সার্ভার সময়মতো সাড়া দেয়নি। নিচ থেকে অন্য সার্ভার বেছে নিন বা ব্রাউজারে সরাসরি খুলুন।' });
+                if (settled || token !== playToken) return;
+                handleSourceFailure(token, 'embed-timeout');
             }, 20000);
 
             embedFrame.onload = function () {
                 const src = embedFrame.getAttribute('src') || '';
                 if (!src || src === 'about:blank') return;
+                if (token !== playToken) return;
                 settled = true;
                 clearTimeout(watchdog);
                 setState('playing');
@@ -2018,9 +2079,10 @@ include_once './includes/header.php';
                 startProgressLoop(currentEp);
             };
             embedFrame.onerror = function () {
+                if (settled || token !== playToken) return;
                 settled = true;
                 clearTimeout(watchdog);
-                setState('error', { message: 'সার্ভার লোড হয়নি। অন্য সার্ভার বেছে নিন।' });
+                handleSourceFailure(token, 'embed-onerror');
             };
             embedFrame.src = url;
         }
@@ -2048,10 +2110,381 @@ include_once './includes/header.php';
             KP.embedServers = [];
         }
 
+        // ─── Source queue + auto-fallback ───────────────────────────
+        // resolve() hands us a payload; buildSourceQueue() turns it into the
+        // ordered list of candidates the player walks: primary → other direct
+        // servers → embed iframes last. One entry shape for every provider,
+        // so playSourceAt() has a single dispatch path.
+        function buildSourceQueue() {
+            if (!payload || !payload.ok) return [];
+
+            // Server-built queue (stream_attach_sources) — already normalized
+            // and deduped, embeds appended last.
+            if (Array.isArray(payload.sources) && payload.sources.length) {
+                return payload.sources.slice();
+            }
+
+            // Endpoints without a server queue (TMDB movie/TV, PHP fallbacks):
+            // derive the same shape from mode/url/servers.
+            var servers = Array.isArray(payload.servers) ? payload.servers : [];
+            var out = [];
+            var seen = {};
+
+            function push(o) {
+                var id = o.url || o.dataLink || '';
+                if (id) {
+                    if (seen[id]) return;
+                    seen[id] = true;
+                }
+                out.push({
+                    type: o.mode === 'embed' ? 'embed' : 'hls',
+                    mode: o.mode || 'hls',
+                    url: o.url || null,
+                    dataLink: o.dataLink || null,
+                    provider: o.provider || null,
+                    key: o.key || null,
+                    label: o.label || null,
+                    lang: o.lang || 'any',
+                    headers: null,
+                    expires_at: null,
+                    subtitles: o.subtitles || [],
+                    intro: o.intro || null,
+                    outro: o.outro || null
+                });
+            }
+
+            // Primary = the payload's own url, wearing the matching server's
+            // chip identity (key/label) so remembered servers and active chips
+            // keep lining up.
+            var match = null;
+            servers.forEach(function (s) { if (!match && s && s.url && s.url === payload.url) match = s; });
+            var meta = match || ((payload.embed && payload.embed.url === payload.url) ? payload.embed : null);
+
+            if (payload.url) {
+                push({
+                    mode: payload.mode || 'hls',
+                    url: payload.url,
+                    provider: meta ? meta.provider : payload.source,
+                    key: payload.server_key || (meta && meta.key) || payload.source || 'primary',
+                    label: meta ? meta.label : payload.source,
+                    lang: payload.lang || 'any',
+                    subtitles: payload.subtitles || [],
+                    intro: payload.intro,
+                    outro: payload.outro
+                });
+            }
+            servers.forEach(function (s) {
+                if (!s) return;
+                push({
+                    mode: s.mode || 'hls',
+                    url: s.url,
+                    dataLink: s.dataLink || null,
+                    provider: s.provider || null,
+                    key: s.key,
+                    label: s.label,
+                    lang: s.lang
+                });
+            });
+
+            return out;
+        }
+
+        /** Entries the walk is allowed to land on for the current language. */
+        function queueEntryPlayable(entry) {
+            return !entry.lang || entry.lang === currentMode || entry.lang === 'any';
+        }
+
+        /** Prefer the mirror this viewer picked last visit: move it to front. */
+        function applyRememberedServer() {
+            var wanted = rememberedServer();
+            if (!wanted || !sourceQueue.length) return;
+            for (var i = 0; i < sourceQueue.length; i++) {
+                if (sourceQueue[i].key !== wanted) continue;
+                var hit = sourceQueue.splice(i, 1)[0];
+                sourceQueue.unshift(hit);
+                if (payload && payload.ok) payload.source = 'embed:' + (hit.key || '');
+                return;
+            }
+        }
+
+        /**
+         * One source died. Ignore callbacks from attempts the viewer already
+         * navigated away from, bank the position, then walk to the next
+         * compatible entry — or fail with every chip still on offer.
+         */
+        function handleSourceFailure(token, reason) {
+            if (token !== playToken) return;   // stale attempt — go quiet
+            playToken++;                        // consume: its other signals are dead now
+            var consumed = playToken;
+
+            console.warn('[KP] source failed:', reason, '→ trying next source');
+            // A media URL that just died must not be replayed from cache —
+            // the next time its chip is picked we ask for a fresh one.
+            if (resolverActive) {
+                delete resolverCache[resolverActive];
+                // Its media URL just died — allow a fresh resolve next time
+                // this chip is picked instead of dropping to the iframe.
+                delete resolverTried[resolverActive];
+                resolverActive = null;
+            }
+            flushProgress();
+            var pos = currentEpisodePosition();
+            if (pos > 10) attemptResume = pos;
+
+            var next = sourceIdx + 1;
+            while (next < sourceQueue.length && !queueEntryPlayable(sourceQueue[next])) next++;
+
+            if (next >= sourceQueue.length) {
+                setState('error', {
+                    message: 'সব সোর্স ব্যর্থ হয়েছে। নিচ থেকে অন্য সার্ভার বেছে নিন বা আবার চেষ্টা করুন।'
+                });
+                return;
+            }
+
+            setState('loading', {
+                message: 'পরবর্তী সোর্সে যাওয়া হচ্ছে… (' + (next + 1) + '/' + sourceQueue.length + ')'
+            });
+            setTimeout(function () {
+                if (playToken !== consumed) return;   // superseded meanwhile
+                playSourceAt(next);
+            }, 350);
+        }
+
+        // ─── Level 1: embed server → direct media ────────────────────
+        // The server-side resolver (includes/resolve_source.php) turns a
+        // supported embed URL into an hls/mp4 URL the ArtPlayer runs natively.
+        // Every other outcome — provider unsupported, blocked URL, timeout,
+        // upstream error — falls straight through to the iframe for that same
+        // server, so this step can never make playback worse than it was.
+        var resolverCache  = Object.create(null);  // embed url → normalized result
+        var resolverTried  = Object.create(null);  // embed url → already asked once
+        var resolverSpent  = 0;                    // Level-1 attempts in this run
+        var resolverActive = null;                 // url whose result is on screen
+
+        /** New queue run (new payload / episode): Level-1 budget starts over. */
+        function resetResolverRun() {
+            resolverCache  = Object.create(null);
+            resolverTried  = Object.create(null);
+            resolverSpent  = 0;
+            resolverActive = null;
+        }
+
+        function resolverHostOf(url) {
+            try { return new URL(url, location.href).hostname.toLowerCase(); } catch (e) { return ''; }
+        }
+
+        /**
+         * Play one embed queue entry: try the resolver first, then the iframe.
+         * Failures here are deliberately silent — they route to playEmbed(),
+         * never to handleSourceFailure(), because the server still has its
+         * iframe to offer for the very same entry.
+         */
+        function resolveEmbedEntry(entry, token, resumeAt) {
+            var raw  = entry.url || '';
+            var host = resolverHostOf(raw);
+            var ask  = KP.resolverEnabled && raw
+                && (KP.resolverHosts || []).indexOf(host) !== -1
+                && !resolverTried[raw]
+                && resolverSpent < KP.resolverMax;
+
+            if (!ask) { playEmbed(raw, token); return; }
+
+            var hit = resolverCache[raw];
+            if (hit && hit.success) {
+                if (hit.expires_at && hit.expires_at * 1000 <= Date.now()) delete resolverCache[raw];
+                else { playResolved(hit, entry, resumeAt, token); return; }
+            }
+
+            resolverTried[raw] = true;
+            resolverSpent++;
+            setState('loading', { message: 'স্ট্রিম খোঁজা হচ্ছে…' });
+
+            var settled = false;
+            var bail = setTimeout(function () {
+                if (settled || token !== playToken) return;
+                settled = true;
+                console.warn('[KP] resolver timeout → iframe fallback');
+                playEmbed(raw, token);
+            }, KP.resolverTimeout * 1000);
+
+            fetch('./includes/resolve_source.php?url=' + encodeURIComponent(raw))
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (settled || token !== playToken) return;
+                    settled = true;
+                    clearTimeout(bail);
+                    var res = data && data.ok ? data.result : null;
+                    if (res && res.success && res.url) {
+                        console.log('[KP] resolved', res.provider, res.type);
+                        resolverCache[raw] = res;
+                        playResolved(res, entry, resumeAt, token);
+                    } else {
+                        console.log('[KP] resolve refused (' + ((data && data.error) || 'unresolved') + ') → iframe');
+                        playEmbed(raw, token);
+                    }
+                })
+                .catch(function () {
+                    if (settled || token !== playToken) return;
+                    settled = true;
+                    clearTimeout(bail);
+                    console.warn('[KP] resolver request failed → iframe fallback');
+                    playEmbed(raw, token);
+                });
+        }
+
+        /** Play a normalized resolver result through the normal player path. */
+        function playResolved(res, entry, resumeAt, token) {
+            var seen = Object.create(null);
+            var subs = [];
+            function add(s, fromResolver) {
+                if (!s || !s.url || seen[s.url]) return;
+                seen[s.url] = true;
+                if (fromResolver) {
+                    // Resolver captions carry {label,lang}; the player labels
+                    // its menu from `language` and picks srt/vtt from `format`.
+                    s = {
+                        url: s.url,
+                        language: s.lang || s.label || 'Subtitle',
+                        format: /\.srt(\?|#|$)/i.test(s.url) ? 'srt' : 'vtt',
+                        default: false
+                    };
+                }
+                subs.push(s);
+            }
+            (entry.subtitles || []).forEach(function (s) { add(s, false); });
+            (res.subtitles || []).forEach(function (s) { add(s, true); });
+
+            resolverActive = res.url;
+            playHls(res.url, subs, entry.intro || null, entry.outro || null,
+                    resumeAt, token, res.type === 'mp4' ? 'mp4' : 'm3u8');
+        }
+
+        /** Start queue[index]; failures from here fall through to the next entry. */
+        function playSourceAt(index) {
+            if (!payload || !payload.ok || !sourceQueue.length) {
+                setState('error', { message: 'কোনো প্লেয়েবল সোর্স নেই। আবার চেষ্টা করুন।' });
+                return;
+            }
+            if (index < 0 || index >= sourceQueue.length) {
+                setState('error', {
+                    message: 'সব সোর্স ব্যর্থ হয়েছে। নিচ থেকে অন্য সার্ভার বেছে নিন বা আবার চেষ্টা করুন।'
+                });
+                return;
+            }
+
+            sourceIdx = index;
+            playToken++;
+            var token = playToken;
+            var entry = sourceQueue[index];
+            markActiveChip(entry);
+            // Drop the previous attempt right away: a decrypt hop happens with
+            // no player call in between, and the dead player must not sit on
+            // screen (or keep emitting events) while the fetch runs.
+            destroyPlayers();
+
+            var resumeAt = attemptResume > 10
+                ? attemptResume
+                : (wantResume ? (resumeCache[epKey(currentEp)] || 0) : 0);
+            attemptResume = 0;
+
+            if (entry.mode === 'embed') {
+                resolveEmbedEntry(entry, token, resumeAt);
+                return;
+            }
+            if (entry.url) {
+                playHls(entry.url, entry.subtitles || [], entry.intro || null, entry.outro || null, resumeAt, token);
+                return;
+            }
+            if (entry.dataLink) {
+                setState('loading', { message: 'স্ট্রিম ডিক্রিপ্ট হচ্ছে…' });
+                fetch('./includes/get_reanime_stream.php?link=' + encodeURIComponent(entry.dataLink))
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        if (token !== playToken) return;
+                        if (data && data.url) {
+                            // Remember the decrypt: picking this chip again later
+                            // plays straight through without a second round-trip.
+                            entry.url = data.url;
+                            entry.subtitles = data.subtitles || entry.subtitles || [];
+                            entry.intro = data.intro_chapter || entry.intro || null;
+                            entry.outro = data.outro_chapter || entry.outro || null;
+                            playHls(data.url, entry.subtitles, entry.intro, entry.outro, resumeAt, token);
+                        } else {
+                            handleSourceFailure(token, 'decrypt-failed');
+                        }
+                    })
+                    .catch(function () {
+                        if (token !== playToken) return;
+                        handleSourceFailure(token, 'decrypt-request-failed');
+                    });
+                return;
+            }
+            handleSourceFailure(token, 'empty-source');
+        }
+
+        /** Highlight the chip belonging to the entry now playing (if any). */
+        function markActiveChip(entry) {
+            if (!chipsEl || !entry || !entry.key) return;
+            var wanted = String(entry.key);
+            var target = null;
+            chipsEl.querySelectorAll('.server-chip').forEach(function (b) {
+                if (b.dataset.key === wanted) target = b;
+            });
+            if (!target) return;
+            chipsEl.querySelectorAll('.server-chip').forEach(function (b) { b.classList.remove('active'); });
+            target.classList.add('active');
+        }
+
+        /**
+         * Queue whatever resolve() last produced, render its chips, then start
+         * it or park on the gate. Every resolve() success path funnels here so
+         * queue, chips and playback can never disagree.
+         */
+        function commitPayload(autoplay) {
+            sourceQueue = buildSourceQueue();
+            sourceIdx = -1;
+            resetResolverRun();
+            applyRememberedServer();
+            renderServers();
+            if (autoplay) playPayload();
+            else { setState('gate'); updateGate(); }
+        }
+
         // ─── Server chips ───────────────────────────────────────────
-        function renderServers(servers) {
-            lastServers = Array.isArray(servers) ? servers : [];
+        // Rendered from the source queue itself: one chip per walkable entry,
+        // so clicking chip N always lands on queue entry N.
+        //
+        // Layout: [সার্ভার] [primary] [▾ অন্যান্য সার্ভার (N)] — the primary
+        // chip is our own player (labelled generically, never by provider) and
+        // every other server sits behind one toggle so the row stays a single
+        // line on mobile. The toggle is not a server: it carries no data-key,
+        // so markActiveChip/useServer never see it.
+
+        /** Does this entry play through our own player (direct media / resolver)? */
+        function isCustomPlayer(entry) {
+            if (!entry) return false;
+            if (entry.dataLink) return true;   // decrypted direct stream (ReAnime)
+            if (entry.mode === 'embed') {
+                return !!(KP.resolverEnabled && entry.url &&
+                    (KP.resolverHosts || []).indexOf(resolverHostOf(entry.url)) !== -1);
+            }
+            return !!entry.url;                // direct hls/mp4
+        }
+
+        /** Base display name — our own player never shows a provider name. */
+        function serverBaseLabel(server, isPrimary) {
+            if (isPrimary && isCustomPlayer(server)) return 'Auto HD';
+            return ((server && (server.label || server.key)) || 'HD').replace(/ · /g, ' ');
+        }
+
+        function renderServers() {
+            lastServers = sourceQueue;
             if (!chipsEl) return;
+
+            // Survive a re-render (SUB/DUB switch): keep the more-row open.
+            var moreEl = chipsEl.querySelector('.kp-chip-more');
+            var wasOpen = !!(moreEl && moreEl.classList.contains('open'));
+
             chipsEl.innerHTML = '';
 
             if (!lastServers.length) {
@@ -2075,42 +2508,216 @@ include_once './includes/header.php';
             lbl.innerHTML = '<i class="fas fa-server"></i> সার্ভার';
             chipsEl.appendChild(lbl);
 
-            var wanted       = rememberedServer();
-            var rememberedBtn = null;
-            var rememberedHit = null;
+            var wanted = rememberedServer();
 
-            filtered.forEach(function (server) {
+            // Duplicate display names (two custom players in one list) get a
+            // numeric suffix — "Auto HD", "Auto HD 2" — so no two chips read
+            // the same. Counted on the base name, before the lang tag.
+            var labelSeen = {};
+
+            function chipFor(server, isPrimary) {
                 var btn = document.createElement('button');
-                btn.className = 'server-chip';
-                btn.dataset.key = server.key;
+                btn.className = 'server-chip' + (isPrimary ? ' server-chip-primary' : '');
+                btn.dataset.key = server.key || '';
+                btn.dataset.url = server.url || '';
                 var langTag = (!server.lang || server.lang === 'any') ? '' : ' [' + server.lang.toUpperCase() + ']';
-                btn.textContent = (server.label || server.key || 'HD').replace(/ · /g, ' ') + langTag;
-                if (wanted && server.key === wanted) {
-                    rememberedBtn = btn;
-                    rememberedHit = server;
-                }
+                // Our own player never shows a provider name — the primary chip
+                // is always "Auto HD"; foreign servers keep their real label.
+                var base = serverBaseLabel(server, isPrimary);
+                labelSeen[base] = (labelSeen[base] || 0) + 1;
+                var name = labelSeen[base] > 1 ? base + ' ' + labelSeen[base] : base;
+                btn.textContent = name + langTag;
                 btn.addEventListener('click', function () {
-                    document.querySelectorAll('.server-chip').forEach(function (b) {
+                    chipsEl.querySelectorAll('.server-chip').forEach(function (b) {
                         b.classList.remove('active');
                     });
                     btn.classList.add('active');
                     useServer(server);
                 });
-                chipsEl.appendChild(btn);
-            });
-
-            if (rememberedBtn) {
-                // This title still offers the server the viewer chose last time,
-                // so start there instead of the first mirror in the list.
-                rememberedBtn.classList.add('active');
-                if (rememberedHit && payload && payload.ok) {
-                    payload.url    = rememberedHit.url;
-                    payload.source = 'embed:' + (rememberedHit.key || '');
-                }
-            } else {
-                var first = chipsEl.querySelector('.server-chip');
-                if (first) first.classList.add('active');
+                return btn;
             }
+
+            var primary    = filtered[0];
+            var rest       = filtered.slice(1);
+            var primaryBtn = chipFor(primary, true);
+            chipsEl.appendChild(primaryBtn);
+
+            var moreBtn = null, moreWrap = null;
+            if (rest.length) {
+                moreBtn = document.createElement('button');
+                moreBtn.type = 'button';
+                moreBtn.className = 'kp-chip-more-btn';
+                moreBtn.setAttribute('aria-expanded', 'false');
+                moreBtn.innerHTML = '<i class="fas fa-layer-group"></i> অন্যান্য সার্ভার ' +
+                    '<span class="kp-chip-count">' + rest.length + '</span>';
+                chipsEl.appendChild(moreBtn);
+
+                moreWrap = document.createElement('div');
+                moreWrap.className = 'kp-chip-more' + (wasOpen ? ' open' : '');
+                rest.forEach(function (server) { moreWrap.appendChild(chipFor(server, false)); });
+                chipsEl.appendChild(moreWrap);
+
+                if (wasOpen) {
+                    moreBtn.classList.add('open');
+                    moreBtn.setAttribute('aria-expanded', 'true');
+                }
+                moreBtn.addEventListener('click', function () {
+                    var open = moreWrap.classList.toggle('open');
+                    moreBtn.classList.toggle('open', open);
+                    moreBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+                });
+            }
+
+            // Highlight the remembered mirror, else the primary chip — and if
+            // the active one is parked in the collapsed row, open it so the
+            // viewer can see which server is actually playing.
+            var target = null;
+            if (wanted) {
+                chipsEl.querySelectorAll('.server-chip').forEach(function (b) {
+                    if (b.dataset.key === wanted) target = b;
+                });
+            }
+            if (!target) target = primaryBtn;
+            target.classList.add('active');
+            if (moreWrap && target !== primaryBtn && moreWrap.contains(target)) {
+                moreWrap.classList.add('open');
+                moreBtn.classList.add('open');
+                moreBtn.setAttribute('aria-expanded', 'true');
+            }
+        }
+
+        // ─── In-player settings (mirrors of the outside controls) ──
+
+        /**
+         * Add the সার্ভার + ভাষা rows to a freshly created player. Everything
+         * here is rebuilt per player, so the ✓ marks always describe what is
+         * actually playing right now.
+         */
+        function addPlayerSettings(player) {
+            if (!player || !player.setting) return;
+
+            // সার্ভার — only servers OUR player can take over (direct media or
+            // a resolvable embed): picking one must switch the ArtPlayer
+            // source, so iframe-only providers stay out of this menu (they
+            // remain in the chips row outside). The setting panel calls the
+            // *parent* item's onSelect with the clicked child — a child-level
+            // onSelect is never invoked — so the switch lives on the parent,
+            // and `default` marks the actually-playing entry (pink).
+            var list = (sourceQueue.length ? sourceQueue : lastServers).filter(function (s) {
+                return isCustomPlayer(s) &&
+                    (!s.lang || s.lang === currentMode || s.lang === 'any');
+            });
+            if (list.length > 1) {
+                var activeIdx = -1;
+                var seen = {};
+                var items = list.map(function (s, i) {
+                    var base = serverBaseLabel(s, i === 0);
+                    seen[base] = (seen[base] || 0) + 1;
+                    var name = seen[base] > 1 ? base + ' ' + seen[base] : base;
+                    var tag = (!s.lang || s.lang === 'any') ? '' : ' [' + s.lang.toUpperCase() + ']';
+                    var active = (sourceIdx >= 0 && sourceQueue[sourceIdx] && s === sourceQueue[sourceIdx]);
+                    if (active) activeIdx = i;
+                    return { html: name + tag, value: i, default: active };
+                });
+                if (activeIdx < 0) { activeIdx = 0; items[0].default = true; }
+                player.setting.add({
+                    name: 'KPSource',
+                    html: 'সার্ভার',
+                    tooltip: items[activeIdx].html,
+                    selector: items,
+                    onSelect: function (item) {
+                        var s = list[Number(item.value)];
+                        if (s) useServer(s);
+                        return item.html;
+                    }
+                });
+            }
+
+            // ভাষা — SUB/DUB with the exact behaviour of the outside buttons.
+            // TMDB movie/TV pages have no language concept (external embeds).
+            if (!KP.isTmdbMovie && !KP.isTmdbTv) {
+                player.setting.add({
+                    name: 'KPLang',
+                    html: 'ভাষা',
+                    tooltip: currentMode.toUpperCase(),
+                    selector: ['sub', 'dub'].map(function (m) {
+                        return { html: m.toUpperCase(), value: m, default: currentMode === m };
+                    }),
+                    onSelect: function (item) {
+                        var m = String(item.value);
+                        if (m !== currentMode) {
+                            currentMode = m;
+                            currentLang = m;
+                            renderLangToggle();
+                            resolve(currentEp, { autoplay: true, force: true });
+                        }
+                        return item.html;
+                    }
+                });
+            }
+        }
+
+        /**
+         * HLS multi-audio row — only appears when the stream really offers a
+         * choice, and only once per player (the event can fire repeatedly).
+         */
+        function addAudioTrackSetting(player, hls) {
+            if (!player || !hls || player.kpAudioAdded || !player.setting) return;
+            var tracks = hls.audioTracks;
+            if (!tracks || tracks.length <= 1) return;
+            player.kpAudioAdded = true;
+
+            var labels = [];
+            var items = [];
+            for (var i = 0; i < tracks.length; i++) {
+                (function (idx) {
+                    var t = tracks[idx] || {};
+                    var label = t.name || t.label || ('Track ' + (idx + 1));
+                    if (t.language) label += ' (' + t.language + ')';
+                    labels[idx] = label;
+                    items.push({
+                        html: label,
+                        value: idx,
+                        default: hls.audioTrack === idx
+                    });
+                })(i);
+            }
+            var cur = labels[hls.audioTrack] || labels[0] || '';
+            player.setting.add({
+                name: 'KPAudio',
+                html: 'অডিও ট্র্যাক',
+                tooltip: cur,
+                selector: items,
+                onSelect: function (item) {
+                    var idx = Number(item.value);
+                    hls.audioTrack = idx;
+                    if (player.notice) player.notice.show = (labels[idx] || item.html) + ' selected';
+                    return item.html;
+                }
+            });
+        }
+
+        /**
+         * Site-name watermark, mounted inside the ArtPlayer root so it stays
+         * on screen in fullscreen too. Recreated with every player (destroy()
+         * takes it along) and revealed by setState() only while playing —
+         * an iframe embed is not ours to watermark.
+         */
+        function mountWatermark(player) {
+            try {
+                var host = (player.template && player.template.$player)
+                    || player.$player
+                    || (player.$container && player.$container.querySelector('.art-video-player'));
+                if (!host) return;
+                var old = host.querySelector('#kp-watermark');
+                if (old) old.parentNode.removeChild(old);
+                var wm = document.createElement('div');
+                wm.id = 'kp-watermark';
+                wm.setAttribute('aria-hidden', 'true');
+                wm.textContent = <?= json_encode(defined('KP_SITE_NAME') ? KP_SITE_NAME : 'KitsuPlay', JSON_UNESCAPED_UNICODE) ?>;
+                wm.style.display = 'none';
+                host.appendChild(wm);
+            } catch (e) {}
         }
 
         function renderLangToggle() {
@@ -2147,46 +2754,61 @@ include_once './includes/header.php';
             langEl.appendChild(dubBtn);
         }
 
+        // A chip click is an explicit pick: it starts a fresh attempt at that
+        // queue entry (the queue, not a parallel path, so a failure here keeps
+        // falling through to the entries after it).
         function useServer(server) {
             if (!server) return;
             // An explicit pick is what gets remembered for this title.
             rememberServer(server.key);
 
-            if (server.mode === 'embed') {
-                playEmbed(server.url);
-                return;
+            if (!payload || !payload.ok) return;
+            if (!sourceQueue.length) {
+                sourceQueue = buildSourceQueue();
+                applyRememberedServer();
             }
 
-            const resumeAt = wantResume ? (resumeCache[epKey(currentEp)] || 0) : 0;
-            // Servers we already know the metadata for keep their subtitles and
-            // chapter markers; anything else plays bare.
-            const isCurrent = !!(payload && payload.url === server.url);
-
-            if (server.url) {
-                playHls(
-                    server.url,
-                    isCurrent ? (payload.subtitles || []) : [],
-                    isCurrent ? payload.intro : null,
-                    isCurrent ? payload.outro : null,
-                    resumeAt
-                );
-                return;
+            var index = -1;
+            for (var i = 0; i < sourceQueue.length; i++) {
+                var q = sourceQueue[i];
+                if ((server.key && q.key === server.key) ||
+                    (server.url && q.url === server.url) ||
+                    (server.dataLink && q.dataLink === server.dataLink)) {
+                    index = i;
+                    break;
+                }
             }
-            if (!server.dataLink) return;
-
-            setState('loading', { message: 'স্ট্রিম ডিক্রিপ্ট হচ্ছে…' });
-            fetch('./includes/get_reanime_stream.php?link=' + encodeURIComponent(server.dataLink))
-                .then(function (r) { return r.json(); })
-                .then(function (data) {
-                    if (data && data.url) {
-                        playHls(data.url, data.subtitles || [], data.intro_chapter, data.outro_chapter, resumeAt);
-                    } else {
-                        setState('error', { message: 'এই সার্ভার থেকে স্ট্রিম পাওয়া যায়নি।' });
-                    }
-                })
-                .catch(function () {
-                    setState('error', { message: 'সার্ভার রেসপন্স ব্যর্থ হয়েছে।' });
+            // A chip the queue somehow does not carry (stale render): graft it
+            // on so the pick is still walkable rather than dead.
+            if (index < 0) {
+                sourceQueue.push({
+                    type: server.mode === 'embed' ? 'embed' : 'hls',
+                    mode: server.mode || 'hls',
+                    url: server.url || null,
+                    dataLink: server.dataLink || null,
+                    provider: server.provider || null,
+                    key: server.key,
+                    label: server.label,
+                    lang: server.lang || 'any',
+                    headers: null,
+                    expires_at: null,
+                    subtitles: [],
+                    intro: null,
+                    outro: null
                 });
+                index = sourceQueue.length - 1;
+            }
+
+            // Bank the playhead first (the old player is still alive here):
+            // switching chips must land on the same second, not on the last
+            // heartbeat or the start of the file. With no player attached yet
+            // (gate) leave it unset so playSourceAt falls back to the saved
+            // resume point / from-start intent.
+            if (playerActive) {
+                var pos = currentEpisodePosition();
+                attemptResume = (pos > 10) ? pos : 0;
+            }
+            playSourceAt(index);
         }
 
         // ─── Gate content ───────────────────────────────────────────
@@ -2280,6 +2902,12 @@ include_once './includes/header.php';
 
             currentEp = ep;
             payload = null;
+            // Drop the old queue and retire every attempt still in flight:
+            // failure callbacks keyed to the previous token go quiet here.
+            sourceQueue = [];
+            sourceIdx = -1;
+            attemptResume = 0;
+            playToken++;
             resetWatchClock(resumeCache[epKey(ep)] || 0);
 
             if (autoplay) {
@@ -2302,27 +2930,21 @@ include_once './includes/header.php';
                             // Fallback: use PHP-resolved embed URL
                             if (KP.serverEmbedUrl) {
                                 payload = { ok: true, mode: 'embed', url: KP.serverEmbedUrl, servers: KP.embedServers || [] };
-                                renderServers(KP.embedServers || []);
-                                if (autoplay) playPayload();
-                                else { setState('gate'); updateGate(); }
+                                commitPayload(autoplay);
                                 return;
                             }
                             if (chipsEl) chipsEl.innerHTML = '';
                             setState('error', { message: 'No source found for this movie.' });
                             return;
                         }
-                        renderServers(data.servers || []);
-                        if (autoplay) playPayload();
-                        else { setState('gate'); updateGate(); }
+                        commitPayload(autoplay);
                     })
                     .catch(function(err) {
                         console.error('resolve error', err);
                         // Fallback: use PHP-resolved embed URL
                         if (KP.serverEmbedUrl) {
                             payload = { ok: true, mode: 'embed', url: KP.serverEmbedUrl, servers: KP.embedServers || [] };
-                            renderServers(KP.embedServers || []);
-                            if (autoplay) playPayload();
-                            else { setState('gate'); updateGate(); }
+                            commitPayload(autoplay);
                             return;
                         }
                         if (chipsEl) chipsEl.innerHTML = '';
@@ -2341,18 +2963,14 @@ include_once './includes/header.php';
                             var rebuiltTv = buildTvServers(KP.currentSeason || 1, ep);
                             if (rebuiltTv.length) {
                                 payload = { ok: true, mode: 'embed', url: rebuiltTv[0].url, servers: rebuiltTv };
-                                renderServers(rebuiltTv);
-                                if (autoplay) playPayload();
-                                else { setState('gate'); updateGate(); }
+                                commitPayload(autoplay);
                                 return;
                             }
                             if (chipsEl) chipsEl.innerHTML = '';
                             setState('error', { message: 'No source found for this episode.' });
                             return;
                         }
-                        renderServers(data.servers || []);
-                        if (autoplay) playPayload();
-                        else { setState('gate'); updateGate(); }
+                        commitPayload(autoplay);
                     })
                     .catch(function(err) {
                         console.error('resolve error', err);
@@ -2360,9 +2978,7 @@ include_once './includes/header.php';
                         var rebuiltTvCatch = buildTvServers(KP.currentSeason || 1, ep);
                         if (rebuiltTvCatch.length) {
                             payload = { ok: true, mode: 'embed', url: rebuiltTvCatch[0].url, servers: rebuiltTvCatch };
-                            renderServers(rebuiltTvCatch);
-                            if (autoplay) playPayload();
-                            else { setState('gate'); updateGate(); }
+                            commitPayload(autoplay);
                             return;
                         }
                         if (chipsEl) chipsEl.innerHTML = '';
@@ -2385,14 +3001,7 @@ include_once './includes/header.php';
                         return;
                     }
 
-                    renderServers(data.servers || []);
-
-                    if (autoplay) {
-                        playPayload();
-                    } else {
-                        setState('gate');
-                        updateGate();
-                    }
+                    commitPayload(autoplay);
                 })
                 .catch(function (err) {
                     console.error('resolve error', err);
@@ -2401,17 +3010,16 @@ include_once './includes/header.php';
                 });
         }
 
-        /** Play whatever `resolve()` last produced. */
+        /** Play whatever `resolve()` last produced — start the queue at 0. */
         function playPayload() {
             if (!payload || !payload.ok) return;
             saveHistory(currentEp);
 
-            if (payload.mode === 'hls') {
-                const resumeAt = wantResume ? (resumeCache[epKey(currentEp)] || 0) : 0;
-                playHls(payload.url, payload.subtitles || [], payload.intro, payload.outro, resumeAt);
-            } else {
-                playEmbed(payload.url);
+            if (!sourceQueue.length) {
+                sourceQueue = buildSourceQueue();
+                applyRememberedServer();
             }
+            playSourceAt(0);
         }
 
         function saveHistory(ep) {
@@ -2773,6 +3381,12 @@ include_once './includes/header.php';
 
                     currentEp = 1;
                     payload = null;
+                    // Retire in-flight attempts from the old season so a late
+                    // failure cannot walk the dead queue while episodes load.
+                    sourceQueue = [];
+                    sourceIdx = -1;
+                    attemptResume = 0;
+                    playToken++;
                     showEpisodesLoading();
 
                     loadSeasonEpisodes(sNum, function () {
@@ -3233,6 +3847,19 @@ include_once './includes/header.php';
             setting: true,
             flip: true
         });
+
+        // Same site-name watermark as the main player (custom player only —
+        // the legacy page has no state machine, so it simply stays visible).
+        try {
+            var wmHost = art.template && art.template.$player;
+            if (wmHost) {
+                var wm = document.createElement('div');
+                wm.id = 'kp-watermark';
+                wm.setAttribute('aria-hidden', 'true');
+                wm.textContent = <?= json_encode(defined('KP_SITE_NAME') ? KP_SITE_NAME : 'KitsuPlay', JSON_UNESCAPED_UNICODE) ?>;
+                wmHost.appendChild(wm);
+            }
+        } catch (e) {}
 
         let legacyLastTime = 0;
         let legacyLastSentPos = -1;
