@@ -12,9 +12,12 @@
  */
 
 include_once __DIR__ . '/../http.php';
+include_once __DIR__ . '/../megaplay_relay_lib.php';
 include_once __DIR__ . '/resolver_base.php';
 include_once __DIR__ . '/providers/nhdapi_resolver.php';
 include_once __DIR__ . '/providers/vidcore_resolver.php';
+include_once __DIR__ . '/providers/zokoanime_resolver.php';
+include_once __DIR__ . '/providers/megaplay_resolver.php';
 
 class ResolverManager {
 
@@ -30,8 +33,10 @@ class ResolverManager {
         if (self::$resolvers) return self::$resolvers;
 
         $map = [
-            'nhdapi' => NhdapiResolver::class,
-            'vidcore' => VidcoreResolver::class,
+            'nhdapi'    => NhdapiResolver::class,
+            'vidcore'   => VidcoreResolver::class,
+            'zokoanime' => ZokoanimeResolver::class,
+            'megaplay'  => MegaplayResolver::class,
         ];
 
         foreach (self::allowlist() as $host => $provider) {

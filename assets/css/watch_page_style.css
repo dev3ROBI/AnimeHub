@@ -2278,3 +2278,78 @@ button.report-option {
   border-color: #d7d7e0;
 }
 [data-theme="light"] .kp-report-cancel { color: #444; border-color: #c8c8d2; }
+
+/* ----------------------------------------------------------------------
+   ArtPlayer control bar — designed pass
+   ArtPlayer v5 injects its own stylesheet from JS (there is no separate
+   artplayer.css), so every rule below runs at .artplayer-app specificity
+   to win the cascade over the injected defaults.
+   ------------------------------------------------------------------ */
+.artplayer-app .art-controls {
+  background: linear-gradient(to top, rgba(8, 8, 14, 0.94) 0%, rgba(8, 8, 14, 0.58) 62%, rgba(8, 8, 14, 0) 100%);
+}
+.artplayer-app .art-controls .art-control {
+  border-radius: 7px;
+  margin: 0 1px;
+  color: rgba(244, 244, 248, 0.92);
+  transition: color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+.artplayer-app .art-controls .art-control:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+.artplayer-app .art-controls .art-control:active {
+  transform: scale(0.93);
+}
+.artplayer-app .art-controls .art-control svg {
+  width: 19px;
+  height: 19px;
+}
+.artplayer-app .art-controls .art-control i {
+  display: inline-block;
+  width: 19px;
+  font-size: 17px;
+  line-height: 1;
+  text-align: center;
+}
+.artplayer-app .kp-ctl {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 19px;
+  height: 19px;
+}
+/* CC button lit while a caption track is active */
+.artplayer-app .art-controls .art-control.on,
+.artplayer-app .art-controls .art-control.on:hover {
+  color: #ff2e63;
+}
+
+/* Progress bar — brand gradient, lifts on hover */
+.artplayer-app .art-progress {
+  border-radius: 99px;
+}
+.artplayer-app .art-progress-played {
+  background: linear-gradient(90deg, #ff2e63 0%, #ff77a1 100%) !important;
+}
+.artplayer-app .art-control-progress:hover .art-progress {
+  height: 6px;
+}
+
+/* Settings + volume panels */
+.artplayer-app .art-setting-panel {
+  border-radius: 12px;
+  background: rgba(14, 14, 20, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+}
+.artplayer-app .art-volume-panel {
+  background: rgba(14, 14, 20, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.artplayer-app .art-volume-slider .art-volume-inner {
+  background: #ff2e63;
+}
+.artplayer-app .art-notice-inner {
+  border-radius: 8px;
+}

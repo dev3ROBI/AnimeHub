@@ -32,6 +32,14 @@ class NhdapiResolver extends ResolverBase {
      */
     private const API_TIMEOUT = 5;
 
+    /**
+     * The dead-window re-check gets a much tighter leash: when the edge is
+     * really black-holing, stretching the retry to the full API timeout is
+     * what used to push a dead resolve past 10s — the recovered answers
+     * arrive in ~650ms, so 2s is plenty to tell the difference.
+     */
+    private const API_RETRY_TIMEOUT = 2;
+
     /** Range probe against an m3u8: quick to answer, so keep it tight. */
     private const VERIFY_HLS = 4;
 
@@ -171,7 +179,7 @@ class NhdapiResolver extends ResolverBase {
             $retryJobs = [];
             foreach ($jobs as $j) {
                 if (isset($retryMe[$j['url']])) {
-                    $j['timeout'] = self::API_TIMEOUT;
+                    $j['timeout'] = self::API_RETRY_TIMEOUT;
                     $retryJobs[] = $j;
                 }
             }

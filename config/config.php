@@ -118,6 +118,18 @@ if (!defined('RESOLVER_MAX_ATTEMPTS')) define('RESOLVER_MAX_ATTEMPTS', 3); // Le
  * provider's own APIs) — and the client mirrors this list to decide which
  * embed chips may attempt a resolve.
  *
+ * zokoanime.video is NHD's own upstream for anime: its /stream/ani page
+ * carries the decoded player config (the same m3u8 NHD's API returns) and is
+ * how the Auto HD chip serves DUB — NHD's extraction API only ever answers
+ * with the /sub sibling.
+ *
+ * megaplay.buzz is the embed page whose own player calls getSources; its
+ * resolver decrypts the payload (the AES key ships in their e1-player.js)
+ * and hands the client a signed URL on includes/megaplay_relay.php instead
+ * of the raw CDN link — the media CDN only answers with a megaplay Referer,
+ * which a browser on this origin can never send. The relay re-verifies the
+ * HMAC + its own CDN host/path allowlist on every request.
+ *
  * AniXo was probed and deliberately left out: its m3u8 relay answers only
  * with Referer: anixo.buzz, so a URL extracted here would 403 in the
  * browser — that chip keeps its iframe (same for the CF-blocked VidPlus
@@ -125,10 +137,12 @@ if (!defined('RESOLVER_MAX_ATTEMPTS')) define('RESOLVER_MAX_ATTEMPTS', 3); // Le
  */
 if (!isset($GLOBALS['RESOLVER_ALLOWLIST'])) {
     $GLOBALS['RESOLVER_ALLOWLIST'] = [
-        'nhdapi.com'  => 'nhdapi',
-        'vidcore.org' => 'vidcore',
-        'vidzen.fun'  => 'vidcore',
-        'movish.to'   => 'vidcore',
+        'nhdapi.com'      => 'nhdapi',
+        'vidcore.org'     => 'vidcore',
+        'vidzen.fun'      => 'vidcore',
+        'movish.to'       => 'vidcore',
+        'zokoanime.video' => 'zokoanime',
+        'megaplay.buzz'   => 'megaplay',
     ];
 }
 
@@ -218,8 +232,16 @@ if (!function_exists('catalog_order')) {
 // ─── Movie embed providers (fallback chain) ──────────────────────────
 if (!isset($GLOBALS['MOVIE_EMBED_PROVIDERS'])) {
     $GLOBALS['MOVIE_EMBED_PROVIDERS'] = [
-        // === Priority: Auto HD (nhdapi) first ===
-        'nhdapi'       => ['label' => 'Auto HD',    'url' => 'https://nhdapi.com/movie/{tmdb}'],
+        /*
+         * Priority: VidCore first. Its backends (vidzen.fun / movish.to)
+         * answer in ~1.5s and have not missed once, while nhdapi's edge
+         * regularly burns 10s+ on timeouts before failing — putting VidCore
+         * first is what makes Auto HD start playing quickly. nhdapi stays
+         * as the second custom-player source (chip label "NHD": the first
+         * custom chip is always relabelled "Auto HD").
+         */
+        'vidcore-org'  => ['label' => 'VidCore',    'url' => 'https://vidcore.org/embed/movie/{tmdb}'],
+        'nhdapi'       => ['label' => 'NHD',        'url' => 'https://nhdapi.com/movie/{tmdb}'],
         // === Then VidFast/VidLink ===
         'vidfast'      => ['label' => 'VidFast',    'url' => 'https://vidfast.pro/movie/{tmdb}?autoPlay=true'],
         'vidlink'      => ['label' => 'VidLink',    'url' => 'https://vidlink.pro/movie/{tmdb}'],
@@ -229,7 +251,6 @@ if (!isset($GLOBALS['MOVIE_EMBED_PROVIDERS'])) {
         'vidsrc-buzz'  => ['label' => 'VidSrc (buzz)','url' => 'https://vidsrc.buzz/embed/movie/{tmdb}'],
         'videm'        => ['label' => 'Videm',        'url' => 'https://videm.xyz/embed/movie/{tmdb}'],
         // === Fallback ===
-        'vidcore-org'  => ['label' => 'VidCore',    'url' => 'https://vidcore.org/embed/movie/{tmdb}'],
         '2embed-skin'  => ['label' => '2Embed',     'url' => 'https://www.2embed.skin/embed/{tmdb}'],
         '2embed-cc'    => ['label' => '2Embed (cc)','url' => 'https://www.2embed.cc/embed/{tmdb}'],
     ];
@@ -238,8 +259,9 @@ if (!isset($GLOBALS['MOVIE_EMBED_PROVIDERS'])) {
 // ─── TV embed providers (fallback chain) ─────────────────────────────
 if (!isset($GLOBALS['TV_EMBED_PROVIDERS'])) {
     $GLOBALS['TV_EMBED_PROVIDERS'] = [
-        // === Priority: Auto HD (nhdapi) first ===
-        'nhdapi'       => ['label' => 'Auto HD',    'url' => 'https://nhdapi.com/tv/{tmdb}/{season}/{episode}'],
+        // VidCore first for the same reason as the movie list (see there).
+        'vidcore-org'  => ['label' => 'VidCore',    'url' => 'https://vidcore.org/embed/tv/{tmdb}/{season}/{episode}'],
+        'nhdapi'       => ['label' => 'NHD',        'url' => 'https://nhdapi.com/tv/{tmdb}/{season}/{episode}'],
         // === Then VidFast/VidLink ===
         'vidfast'      => ['label' => 'VidFast',    'url' => 'https://vidfast.pro/tv/{tmdb}/{season}/{episode}?autoPlay=true'],
         'vidlink'      => ['label' => 'VidLink',    'url' => 'https://vidlink.pro/tv/{tmdb}/{season}/{episode}'],
@@ -254,7 +276,6 @@ if (!isset($GLOBALS['TV_EMBED_PROVIDERS'])) {
         'vidsrc-buzz'  => ['label' => 'VidSrc (buzz)','url' => 'https://vidsrc.buzz/embed/tv/{tmdb}/{season}/{episode}'],
         'videm'        => ['label' => 'Videm',        'url' => 'https://videm.xyz/embed/tv/{tmdb}/{season}/{episode}'],
         // === Fallback ===
-        'vidcore-org'  => ['label' => 'VidCore',    'url' => 'https://vidcore.org/embed/tv/{tmdb}/{season}/{episode}'],
         '2embed-skin'  => ['label' => '2Embed',     'url' => 'https://www.2embed.skin/embedtv/{tmdb}&s={season}&e={episode}'],
         '2embed-cc'    => ['label' => '2Embed (cc)','url' => 'https://www.2embed.cc/embedtv/{tmdb}&s={season}&e={episode}'],
     ];

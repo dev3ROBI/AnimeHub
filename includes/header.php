@@ -124,8 +124,7 @@ include_once __DIR__ . '/performance.php';
     <?php endif; ?>
     <?php if ($kp_is_watch): ?>
     <link rel="stylesheet" href="<?= htmlspecialchars(kp_asset('css', 'watch_page_style.css'), ENT_QUOTES, 'UTF-8') ?>" />
-    <!-- ArtPlayer Core CSS and JS — only on watch pages -->
-    <link rel="stylesheet" href="https://unpkg.com/artplayer/dist/artplayer.css">
+    <!-- ArtPlayer Core JS - only on watch pages (v5 bundles its own CSS) -->
     <script src="https://unpkg.com/artplayer/dist/artplayer.js" defer></script>
     <!-- Ambilight Plugin -->
     <script src="https://unpkg.com/artplayer-plugin-ambilight/dist/artplayer-plugin-ambilight.js" defer></script>

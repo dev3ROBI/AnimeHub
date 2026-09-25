@@ -568,15 +568,15 @@ include_once './includes/header.php';
             <!-- Skeleton while the stream resolves. -->
             <div id="kp-player-loading" class="kp-player-loading" style="display:none;">
                 <div class="kp-skeleton"></div>
-                <p><i class="fas fa-spinner fa-spin"></i> <span id="kp-loading-text">সোর্স খোঁজা হচ্ছে…</span></p>
+                <p><i class="fas fa-spinner fa-spin"></i> <span id="kp-loading-text">Finding sources…</span></p>
             </div>
 
             <!-- Themed failure state with retry. -->
             <div id="kp-player-error" class="kp-player-error" style="display:none;">
                 <i class="fa-solid fa-triangle-exclamation"></i>
-                <h3>স্ট্রিম লোড হয়নি</h3>
+                <h3>Stream failed to load</h3>
                 <p id="kp-error-text"></p>
-                <button type="button" id="kp-error-retry"><i class="fas fa-redo"></i> আবার চেষ্টা করুন</button>
+                <button type="button" id="kp-error-retry"><i class="fas fa-redo"></i> Try again</button>
             </div>
 
             <!-- Auto-play next episode overlay -->
@@ -1345,6 +1345,15 @@ include_once './includes/header.php';
         // instead of walking the queue twice.
         let sourceQueue = [];
         let sourceIdx = -1;
+        // Auto HD (the default) prefers OUR player: embed entries the
+        // resolver cannot take over are skipped while the walk still has
+        // servers to try, and an iframe only appears once extraction is
+        // exhausted. useServer() flips the mode off when an explicit
+        // non-primary chip or menu entry is picked for that run.
+        let autoHdMode = true;
+        let currentPrimary = null;    // queue entry the Auto HD chip stands for
+        let entryTried = Object.create(null);   // queue index → started this run
+        let iframeTried = Object.create(null);  // embed url → iframe already shown
         let playToken = 0;
         let attemptResume = 0;       // position to keep when auto-advancing
         let sourceWatchdog = null;   // startup watchdog for the active attempt
@@ -1486,10 +1495,10 @@ include_once './includes/header.php';
             if (wm) wm.style.display = (state === 'playing') ? 'block' : 'none';
 
             if (state === 'error' && errorText) {
-                errorText.textContent = opts.message || 'অজানা সমস্যা হয়েছে।';
+                errorText.textContent = opts.message || 'Something went wrong.';
             }
             if (state === 'loading' && loadingText) {
-                loadingText.textContent = opts.message || 'সোর্স খোঁজা হচ্ছে…';
+                loadingText.textContent = opts.message || 'Finding sources…';
             }
             if (state !== 'gate') hideStatus();
         }
@@ -1663,7 +1672,12 @@ include_once './includes/header.php';
         let nextTimer = null;
         let nextCancelled = false;
 
-        function showNextEpisode() {
+        /**
+         * Where "next episode" should go for this page, or null when the
+         * catalogue has nothing after the current entry.
+         */
+        function computeNextEpisode() {
+            if (KP.isTmdbMovie) return null;
             var nextEp = currentEp;
             var nextSeason = KP.currentSeason;
             var nextMeta = null;
@@ -1690,7 +1704,7 @@ include_once './includes/header.php';
                         nextSeason = allSeasons[idx + 1];
                         nextEp = 1;
                     } else {
-                        return;
+                        return null;
                     }
                 }
 
@@ -1714,7 +1728,7 @@ include_once './includes/header.php';
                 }
                 if (curDn == null) curDn = currentEp + (KP.kpEpOffset || 0);
                 nextMeta = (KP.episodes || []).find(function (x) { return x.dn === curDn + 1; });
-                if (!nextMeta) return;
+                if (!nextMeta) return null;
                 title = nextMeta.t ? nextMeta.t : ('S' + KP.kpSeason + 'E' + nextMeta.dn);
                 if (nextMeta.src && nextMeta.src !== KP.id) {
                     nextUrl = './watch.php?id=' + encodeURIComponent(nextMeta.src) + '&ep=' + nextMeta.n;
@@ -1727,7 +1741,7 @@ include_once './includes/header.php';
             } else {
                 nextEp = currentEp + 1;
                 var hasMore = !KP.total || nextEp <= KP.total;
-                if (!hasMore) return;
+                if (!hasMore) return null;
                 nextMeta = (KP.episodes || []).find(function (e2) {
                     return e2.n === nextEp && (e2.s || 1) === nextSeason;
                 });
@@ -1738,9 +1752,16 @@ include_once './includes/header.php';
                 nextUrl = legacyUrl.toString();
             }
 
-            if (!nextOverlay || !nextUrl) return;
+            if (!nextUrl) return null;
+            return { url: nextUrl, title: title };
+        }
 
-            if (nextTitle) nextTitle.textContent = title;
+        function showNextEpisode() {
+            var nx = computeNextEpisode();
+            if (!nx || !nextOverlay) return;
+            var nextUrl = nx.url;
+
+            if (nextTitle) nextTitle.textContent = nx.title;
 
             nextOverlay.style.display = 'flex';
             nextCancelled = false;
@@ -1793,6 +1814,27 @@ include_once './includes/header.php';
             if (nextTimer) { clearInterval(nextTimer); nextTimer = null; }
         }
 
+        /**
+         * Bottom-bar control: jump straight to the next episode (the same
+         * target the end-of-episode overlay uses).
+         */
+        function addNextEpisodeControl(player) {
+            if (!player || !player.controls || player.kpNextAdded) return;
+            player.kpNextAdded = true;
+            player.controls.add({
+                name: 'kp-next',
+                position: 'left',
+                index: 11,
+                html: '<span class="kp-ctl kp-ctl-next"><i class="fas fa-forward-step"></i></span>',
+                tooltip: 'Next episode',
+                click: function () {
+                    var nx = computeNextEpisode();
+                    if (nx && nx.url) { window.location.href = nx.url; }
+                    else if (player.notice) { player.notice.show = 'No next episode'; }
+                }
+            });
+        }
+
         // ─── HLS playback via Artplayer ─────────────────────────────
         // `token` identifies this attempt: every failure path below reports
         // through handleSourceFailure(token, …), which ignores callbacks that
@@ -1804,14 +1846,17 @@ include_once './includes/header.php';
 
             if (!artBox) { handleSourceFailure(token, 'no-player-box'); return; }
             artBox.style.display = 'block';
-            setState('loading', { message: 'প্লেয়ার শুরু হচ্ছে…' });
+            setState('loading', { message: 'Starting player…' });
 
             // Direct mp4 links must not be fed to hls.js — it would fail on
             // them and burn a fallback step that was never needed. A resolved
             // source knows its own type, so that wins over the URL sniff.
             const mediaType = typeOverride || (/\.mp4(\?|#|$)/i.test(url) ? 'mp4' : 'm3u8');
 
-            art = new Artplayer({
+            const subs = Array.isArray(subtitles) ? subtitles : [];
+            const preferredSub = subs.find(function (s) { return s.default; }) || (subs.length ? subs[0] : null);
+
+            var artOpts = {
                 container: '#artplayer',
                 url: url,
                 type: mediaType,
@@ -1827,6 +1872,13 @@ include_once './includes/header.php';
                 theme: '#ff2e63',
                 setting: true,
                 flip: true,
+                pip: true,
+                subtitleOffset: true,
+                autoMini: true,
+                lock: true,
+                fastForward: true,
+                autoOrientation: true,
+                lang: 'en',
                 miniProgressBar: true,
                 whitelist: ['*'],
                 customType: {
@@ -1837,6 +1889,19 @@ include_once './includes/header.php';
                                 if (!art) return;
                                 art.hlsInstance = hls;
                                 addAudioTrackSetting(art, hls);
+                            });
+                            hls.on(Hls.Events.MANIFEST_PARSED, function () {
+                                if (!art) return;
+                                art.hlsInstance = hls;
+                                addQualitySetting(art, hls);
+                            });
+                            hls.on(Hls.Events.LEVELS_UPDATED, function () {
+                                if (!art) return;
+                                addQualitySetting(art, hls);
+                            });
+                            hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, function () {
+                                if (!art) return;
+                                addHlsSubtitleSetting(art, hls);
                             });
                             hls.loadSource(src);
                             hls.attachMedia(video);
@@ -1855,7 +1920,21 @@ include_once './includes/header.php';
                         }
                     }
                 }
-            });
+            };
+
+            if (preferredSub) {
+                artOpts.subtitle = {
+                    url: preferredSub.url,
+                    type: (preferredSub.format === 'srt') ? 'srt' : 'vtt',
+                    escape: false,
+                    encoding: 'utf-8'
+                };
+            }
+            art = new Artplayer(artOpts);
+            // External captions win over manifest-embedded ones: both flows
+            // share a single সাবটাইটেল row, so claim it before any hls.js
+            // subtitle event can race us (those fire asynchronously anyway).
+            if (subs.length) { art.kpExtSubs = true; }
 
             mountWatermark(art);
 
@@ -1871,7 +1950,12 @@ include_once './includes/header.php';
                 setState('playing');
                 playerActive = true;
                 addPlayerSettings(art);
-                if (art.hlsInstance) addAudioTrackSetting(art, art.hlsInstance);
+                addNextEpisodeControl(art);
+                if (art.hlsInstance) {
+                    addAudioTrackSetting(art, art.hlsInstance);
+                    addQualitySetting(art, art.hlsInstance);
+                    addHlsSubtitleSetting(art, art.hlsInstance);
+                }
                 // The real file duration beats the catalogue estimate.
                 if (art.duration && art.duration > 0) {
                     episodeRuntime = Math.round(art.duration);
@@ -1917,103 +2001,121 @@ include_once './includes/header.php';
                 showNextEpisode();
             });
 
-            // Attach subtitles (Artplayer exposes `subtitle` as a property).
-            const subs = Array.isArray(subtitles) ? subtitles : [];
+            // Attach subtitles. The URL goes through the subtitle instance's
+            // `url` setter (assigning `art.subtitle = …` would clobber the
+            // instance), and onSelect lives on the PARENT row — the setting
+            // panel never calls a child-level onSelect.
             if (subs.length) {
-                const preferred = subs.find(function (s) { return s.default; }) || subs[0];
                 art.once('ready', function () {
-                    art.subtitle = {
-                        url: preferred.url,
-                        type: (preferred.format === 'srt') ? 'srt' : 'vtt',
-                        escape: false,
-                        encoding: 'utf-8'
-                    };
-                    if (subs.length > 1) {
-                        art.setting.add({
-                            html: 'Subtitle',
-                            selector: subs.map(function (s, i) {
-                                return {
-                                    html: s.language || ('Subtitle ' + (i + 1)),
-                                    onSelect: function () {
-                                        art.subtitle = {
-                                            url: s.url,
-                                            type: (s.format === 'srt') ? 'srt' : 'vtt',
-                                            escape: false,
-                                            encoding: 'utf-8'
-                                        };
-                                        art.notice.show = (s.language || 'Subtitle') + ' selected';
-                                        return true;
-                                    }
-                                };
-                            }),
-                            index: subs.indexOf(preferred)
-                        });
+                    art.kpSubRowAdded = true;
+
+                    function applySub(sub) {
+                        try {
+                            if (!sub) {   // বন্ধ — hide without dropping the track
+                                var off = art.subtitle && art.subtitle.textTrack;
+                                if (off) off.mode = 'disabled';
+                                return;
+                            }
+                            var cur = art.subtitle && art.subtitle.textTrack;
+                            if (cur && cur.mode === 'disabled' && art.subtitle.url === sub.url) {
+                                cur.mode = 'hidden';   // same file — just re-show
+                                return;
+                            }
+                            art.subtitle.url = sub.url;
+                        } catch (e) {}
                     }
 
-                    // Subtitle customization settings
+                    var subItems = [{ html: 'Off', value: -1 }];
+                    subs.forEach(function (s, i) {
+                        subItems.push({
+                            html: s.language || ('Subtitle ' + (i + 1)),
+                            value: i,
+                            default: s === preferredSub
+                        });
+                    });
+                    art.setting.add({
+                        name: 'KPSub',
+                        html: 'Subtitles',
+                        tooltip: preferredSub ? (preferredSub.language || 'Subtitle') : 'Off',
+                        selector: subItems,
+                        onSelect: function (item) {
+                            var v = Number(item.value);
+                            var sub = v >= 0 ? subs[v] : null;
+                            applySub(sub);
+                            if (art.notice) {
+                                art.notice.show = sub
+                                    ? (sub.language || 'Subtitle') + ' selected'
+                                    : 'Subtitles off';
+                            }
+                            return item.html;
+                        }
+                    });
+
+                    // Bottom-bar CC button — quick subtitle on/off (plus the
+                    // track list) without opening the settings panel. The
+                    // control lights up while a caption track is active.
+                    function setCcOn(on) {
+                        try {
+                            var el = art.controls && art.controls.get && art.controls.get('kp-cc');
+                            if (el) el.classList.toggle('on', !!on);
+                        } catch (e) {}
+                    }
+                    art.controls.add({
+                        name: 'kp-cc',
+                        position: 'right',
+                        index: 31,
+                        html: '<span class="kp-ctl kp-ctl-cc"><i class="fas fa-closed-captioning"></i></span>',
+                        tooltip: preferredSub ? (preferredSub.language || 'Subtitle') : 'Off',
+                        selector: subItems,
+                        onSelect: function (item) {
+                            var v = Number(item.value);
+                            applySub(v >= 0 ? subs[v] : null);
+                            setCcOn(v >= 0);
+                            if (art.notice) {
+                                art.notice.show = v >= 0
+                                    ? ((subs[v].language || 'Subtitle') + ' selected')
+                                    : 'Subtitles off';
+                            }
+                            return item.html;
+                        }
+                    });
+                    setCcOn(!!preferredSub);
+
                     art.setting.add({
                         name: 'SubtitleStyle',
-                        html: 'Subtitle Style',
+                        html: 'Subtitle size',
+                        tooltip: 'Normal',
                         selector: [
-                            {
-                                html: 'Size: Normal',
-                                onSelect: function () {
-                                    art.style.fontSize = '22px';
-                                    art.notice.show = 'Subtitle size: Normal';
-                                    return true;
-                                }
-                            },
-                            {
-                                html: 'Size: Large',
-                                onSelect: function () {
-                                    art.style.fontSize = '28px';
-                                    art.notice.show = 'Subtitle size: Large';
-                                    return true;
-                                }
-                            },
-                            {
-                                html: 'Size: Small',
-                                onSelect: function () {
-                                    art.style.fontSize = '18px';
-                                    art.notice.show = 'Subtitle size: Small';
-                                    return true;
-                                }
-                            }
-                        ]
+                            { html: 'Normal', value: '20px', default: true },
+                            { html: 'Large', value: '28px' },
+                            { html: 'Small', value: '16px' }
+                        ],
+                        onSelect: function (item) {
+                            art.subtitle.style({ fontSize: item.value });
+                            if (art.notice) art.notice.show = 'Subtitle size: ' + item.html;
+                            return item.html;
+                        }
                     });
 
                     art.setting.add({
                         name: 'SubtitleBg',
-                        html: 'Subtitle Background',
+                        html: 'Subtitle background',
+                        tooltip: 'Default',
                         selector: [
-                            {
-                                html: 'Dark',
-                                onSelect: function () {
-                                    var subs = art.querySelectorAll('.art-subtitle');
-                                    subs.forEach(function (s) { s.style.backgroundColor = 'rgba(0,0,0,0.7)'; });
-                                    art.notice.show = 'Subtitle bg: Dark';
-                                    return true;
-                                }
-                            },
-                            {
-                                html: 'Light',
-                                onSelect: function () {
-                                    var subs = art.querySelectorAll('.art-subtitle');
-                                    subs.forEach(function (s) { s.style.backgroundColor = 'rgba(255,255,255,0.7)'; s.style.color = '#000'; });
-                                    art.notice.show = 'Subtitle bg: Light';
-                                    return true;
-                                }
-                            },
-                            {
-                                html: 'Transparent',
-                                onSelect: function () {
-                                    var subs = art.querySelectorAll('.art-subtitle');
-                                    subs.forEach(function (s) { s.style.backgroundColor = 'transparent'; s.style.color = '#fff'; s.style.textShadow = '1px 1px 2px rgba(0,0,0,0.8)'; });
-                                    art.notice.show = 'Subtitle bg: Transparent';
-                                    return true;
-                                }
-                            }
-                        ]
+                            { html: 'Default', value: '' },
+                            { html: 'Dark', value: 'rgba(0, 0, 0, 0.7)' },
+                            { html: 'Light', value: 'rgba(255, 255, 255, 0.85)' },
+                            { html: 'Transparent', value: 'transparent' }
+                        ],
+                        onSelect: function (item) {
+                            var light = item.value === 'rgba(255, 255, 255, 0.85)';
+                            art.subtitle.style({
+                                backgroundColor: item.value || 'transparent',
+                                color: light ? '#000' : '#fff'
+                            });
+                            if (art.notice) art.notice.show = 'Subtitle background: ' + item.html;
+                            return item.html;
+                        }
                     });
                 });
             }
@@ -2046,11 +2148,12 @@ include_once './includes/header.php';
         // only signals available here are onload/onerror and the load watchdog.
         function playEmbed(url, token) {
             if (token == null) token = playToken;
+            if (url) iframeTried[url] = true;
             hideStatus();
             destroyPlayers();
             if (artBox) artBox.style.display = 'none';
             if (embedBox) embedBox.style.display = 'block';
-            setState('loading', { message: 'সার্ভার লোড হচ্ছে…' });
+            setState('loading', { message: 'Loading servers…' });
 
             if (!embedFrame) { handleSourceFailure(token, 'no-embed-frame'); return; }
             if (!url || url === 'about:blank' || url === 'null' || url === '') {
@@ -2232,22 +2335,44 @@ include_once './includes/header.php';
             if (pos > 10) attemptResume = pos;
 
             var next = sourceIdx + 1;
-            while (next < sourceQueue.length && !queueEntryPlayable(sourceQueue[next])) next++;
+            while (next < sourceQueue.length &&
+                   (!queueEntryPlayable(sourceQueue[next]) || entryTried[next])) next++;
 
             if (next >= sourceQueue.length) {
+                if (iframeFallback(consumed)) return;
                 setState('error', {
-                    message: 'সব সোর্স ব্যর্থ হয়েছে। নিচ থেকে অন্য সার্ভার বেছে নিন বা আবার চেষ্টা করুন।'
+                    message: 'All sources failed. Pick another server below or try again.'
                 });
                 return;
             }
 
             setState('loading', {
-                message: 'পরবর্তী সোর্সে যাওয়া হচ্ছে… (' + (next + 1) + '/' + sourceQueue.length + ')'
+                message: 'Trying next source… (' + (next + 1) + '/' + sourceQueue.length + ')'
             });
             setTimeout(function () {
                 if (playToken !== consumed) return;   // superseded meanwhile
                 playSourceAt(next);
             }, 350);
+        }
+
+        /**
+         * Every walkable entry has had its turn: hand the screen to the first
+         * embed iframe not shown yet, so a run that could not be extracted
+         * still ends on playable video instead of an error card. Returns
+         * false when nothing is left — the caller shows the error.
+         */
+        function iframeFallback(token) {
+            for (var i = 0; i < sourceQueue.length; i++) {
+                var e = sourceQueue[i];
+                if (!e || e.mode !== 'embed' || !e.url || !queueEntryPlayable(e)) continue;
+                if (iframeTried[e.url]) continue;
+                console.log('[KP] ArtPlayer sources exhausted → iframe fallback:', e.key || e.url);
+                sourceIdx = i;
+                markActiveChip(e);
+                playEmbed(e.url, token);
+                return true;
+            }
+            return false;
         }
 
         // ─── Level 1: embed server → direct media ────────────────────
@@ -2267,6 +2392,8 @@ include_once './includes/header.php';
             resolverTried  = Object.create(null);
             resolverSpent  = 0;
             resolverActive = null;
+            entryTried     = Object.create(null);
+            iframeTried    = Object.create(null);
         }
 
         function resolverHostOf(url) {
@@ -2287,7 +2414,15 @@ include_once './includes/header.php';
                 && !resolverTried[raw]
                 && resolverSpent < KP.resolverMax;
 
-            if (!ask) { playEmbed(raw, token); return; }
+            if (!ask) {
+                // Auto HD keeps walking: an embed our resolver cannot take
+                // over must not park the run on an iframe while other
+                // servers are still untried. An explicit pick of this very
+                // server keeps its own iframe.
+                if (autoHdMode) { handleSourceFailure(token, 'auto-skip:' + (host || 'no-url')); return; }
+                playEmbed(raw, token);
+                return;
+            }
 
             var hit = resolverCache[raw];
             if (hit && hit.success) {
@@ -2297,14 +2432,20 @@ include_once './includes/header.php';
 
             resolverTried[raw] = true;
             resolverSpent++;
-            setState('loading', { message: 'স্ট্রিম খোঁজা হচ্ছে…' });
+            setState('loading', { message: 'Finding stream…' });
 
             var settled = false;
+            // A failed extract walks to the next server while Auto HD is
+            // active; an explicit pick of this server degrades to its iframe.
+            function giveUp(reason) {
+                console.warn('[KP] ' + reason + ' → ' + (autoHdMode ? 'next source' : 'iframe fallback'));
+                if (autoHdMode) handleSourceFailure(token, reason);
+                else playEmbed(raw, token);
+            }
             var bail = setTimeout(function () {
                 if (settled || token !== playToken) return;
                 settled = true;
-                console.warn('[KP] resolver timeout → iframe fallback');
-                playEmbed(raw, token);
+                giveUp('resolver-timeout');
             }, KP.resolverTimeout * 1000);
 
             fetch('./includes/resolve_source.php?url=' + encodeURIComponent(raw))
@@ -2319,16 +2460,14 @@ include_once './includes/header.php';
                         resolverCache[raw] = res;
                         playResolved(res, entry, resumeAt, token);
                     } else {
-                        console.log('[KP] resolve refused (' + ((data && data.error) || 'unresolved') + ') → iframe');
-                        playEmbed(raw, token);
+                        giveUp('resolve-refused:' + ((data && data.error) || 'unresolved'));
                     }
                 })
                 .catch(function () {
                     if (settled || token !== playToken) return;
                     settled = true;
                     clearTimeout(bail);
-                    console.warn('[KP] resolver request failed → iframe fallback');
-                    playEmbed(raw, token);
+                    giveUp('resolver-request-failed');
                 });
         }
 
@@ -2362,17 +2501,19 @@ include_once './includes/header.php';
         /** Start queue[index]; failures from here fall through to the next entry. */
         function playSourceAt(index) {
             if (!payload || !payload.ok || !sourceQueue.length) {
-                setState('error', { message: 'কোনো প্লেয়েবল সোর্স নেই। আবার চেষ্টা করুন।' });
+                setState('error', { message: 'No playable sources. Try again.' });
                 return;
             }
             if (index < 0 || index >= sourceQueue.length) {
+                if (iframeFallback(playToken)) return;
                 setState('error', {
-                    message: 'সব সোর্স ব্যর্থ হয়েছে। নিচ থেকে অন্য সার্ভার বেছে নিন বা আবার চেষ্টা করুন।'
+                    message: 'All sources failed. Pick another server below or try again.'
                 });
                 return;
             }
 
             sourceIdx = index;
+            entryTried[index] = true;
             playToken++;
             var token = playToken;
             var entry = sourceQueue[index];
@@ -2396,7 +2537,7 @@ include_once './includes/header.php';
                 return;
             }
             if (entry.dataLink) {
-                setState('loading', { message: 'স্ট্রিম ডিক্রিপ্ট হচ্ছে…' });
+                setState('loading', { message: 'Decrypting stream…' });
                 fetch('./includes/get_reanime_stream.php?link=' + encodeURIComponent(entry.dataLink))
                     .then(function (r) { return r.json(); })
                     .then(function (data) {
@@ -2443,6 +2584,7 @@ include_once './includes/header.php';
         function commitPayload(autoplay) {
             sourceQueue = buildSourceQueue();
             sourceIdx = -1;
+            autoHdMode = true;
             resetResolverRun();
             applyRememberedServer();
             renderServers();
@@ -2488,7 +2630,7 @@ include_once './includes/header.php';
             chipsEl.innerHTML = '';
 
             if (!lastServers.length) {
-                chipsEl.innerHTML = '<span style="color:#ff9999;">কোনো সার্ভার নেই।</span>';
+                chipsEl.innerHTML = '<span style="color:#ff9999;">No servers.</span>';
                 return;
             }
 
@@ -2499,13 +2641,13 @@ include_once './includes/header.php';
             if (!filtered.length) {
                 chipsEl.innerHTML = '<span style="color:#ff9999;">' +
                     currentMode.toUpperCase() +
-                    ' ভাষায় কোনো সার্ভার নেই।</span>';
+                    ' has no servers.</span>';
                 return;
             }
 
             var lbl = document.createElement('span');
             lbl.className = 'kp-chip-label';
-            lbl.innerHTML = '<i class="fas fa-server"></i> সার্ভার';
+            lbl.innerHTML = '<i class="fas fa-server"></i> Server';
             chipsEl.appendChild(lbl);
 
             var wanted = rememberedServer();
@@ -2537,8 +2679,17 @@ include_once './includes/header.php';
                 return btn;
             }
 
-            var primary    = filtered[0];
-            var rest       = filtered.slice(1);
+            // The primary chip is Auto HD: our own player, taken from the
+            // FIRST entry it can actually play. iframe-only servers move to
+            // the collapsed row — unless nothing at all extracts, in which
+            // case the first server stays primary under its real name.
+            var primary = null;
+            for (var pi = 0; pi < filtered.length; pi++) {
+                if (isCustomPlayer(filtered[pi])) { primary = filtered[pi]; break; }
+            }
+            if (!primary) primary = filtered[0];
+            currentPrimary = primary;
+            var rest = filtered.filter(function (s) { return s !== primary; });
             var primaryBtn = chipFor(primary, true);
             chipsEl.appendChild(primaryBtn);
 
@@ -2548,7 +2699,7 @@ include_once './includes/header.php';
                 moreBtn.type = 'button';
                 moreBtn.className = 'kp-chip-more-btn';
                 moreBtn.setAttribute('aria-expanded', 'false');
-                moreBtn.innerHTML = '<i class="fas fa-layer-group"></i> অন্যান্য সার্ভার ' +
+                moreBtn.innerHTML = '<i class="fas fa-layer-group"></i> More servers ' +
                     '<span class="kp-chip-count">' + rest.length + '</span>';
                 chipsEl.appendChild(moreBtn);
 
@@ -2596,17 +2747,22 @@ include_once './includes/header.php';
         function addPlayerSettings(player) {
             if (!player || !player.setting) return;
 
-            // সার্ভার — only servers OUR player can take over (direct media or
-            // a resolvable embed): picking one must switch the ArtPlayer
-            // source, so iframe-only providers stay out of this menu (they
-            // remain in the chips row outside). The setting panel calls the
-            // *parent* item's onSelect with the clicked child — a child-level
+            // সার্ভার — only embed/direct servers OUR player can take over:
+            // the menu's promise is "click → auto-extract → ArtPlayer plays
+            // it", so iframe-only providers stay out (they remain in the
+            // chips row outside). The setting panel calls the *parent*
+            // item's onSelect with the clicked child — a child-level
             // onSelect is never invoked — so the switch lives on the parent,
             // and `default` marks the actually-playing entry (pink).
-            var list = (sourceQueue.length ? sourceQueue : lastServers).filter(function (s) {
+            var pool = (sourceQueue.length ? sourceQueue : lastServers).filter(function (s) {
                 return isCustomPlayer(s) &&
                     (!s.lang || s.lang === currentMode || s.lang === 'any');
             });
+            // Auto HD first — the entry the primary chip stands for — then
+            // the other extractable servers, in queue order.
+            var list = [];
+            if (currentPrimary && pool.indexOf(currentPrimary) !== -1) list.push(currentPrimary);
+            pool.forEach(function (s) { if (s !== currentPrimary) list.push(s); });
             if (list.length > 1) {
                 var activeIdx = -1;
                 var seen = {};
@@ -2622,7 +2778,7 @@ include_once './includes/header.php';
                 if (activeIdx < 0) { activeIdx = 0; items[0].default = true; }
                 player.setting.add({
                     name: 'KPSource',
-                    html: 'সার্ভার',
+                    html: 'Server',
                     tooltip: items[activeIdx].html,
                     selector: items,
                     onSelect: function (item) {
@@ -2638,7 +2794,7 @@ include_once './includes/header.php';
             if (!KP.isTmdbMovie && !KP.isTmdbTv) {
                 player.setting.add({
                     name: 'KPLang',
-                    html: 'ভাষা',
+                    html: 'Language',
                     tooltip: currentMode.toUpperCase(),
                     selector: ['sub', 'dub'].map(function (m) {
                         return { html: m.toUpperCase(), value: m, default: currentMode === m };
@@ -2685,13 +2841,104 @@ include_once './includes/header.php';
             var cur = labels[hls.audioTrack] || labels[0] || '';
             player.setting.add({
                 name: 'KPAudio',
-                html: 'অডিও ট্র্যাক',
+                html: 'Audio track',
                 tooltip: cur,
                 selector: items,
                 onSelect: function (item) {
                     var idx = Number(item.value);
                     hls.audioTrack = idx;
                     if (player.notice) player.notice.show = (labels[idx] || item.html) + ' selected';
+                    return item.html;
+                }
+            });
+        }
+
+        /**
+         * কোয়ালিটি row — every level the HLS manifest offers plus অটো (ABR).
+         * Rebuilt only when the level set actually changes; MP4 sources
+         * never call this (one file, one quality).
+         */
+        function addQualitySetting(player, hls) {
+            if (!player || !player.setting || !hls) return;
+            var levels = hls.levels || [];
+            if (levels.length <= 1) return;
+            if (player.kpQualityCount === levels.length) return;
+            if (player.kpQualityCount) { try { player.setting.remove('KPQuality'); } catch (e) {} }
+            player.kpQualityCount = levels.length;
+
+            var dup = {};
+            levels.forEach(function (lv) {
+                var base = lv && lv.height ? lv.height + 'p' : '';
+                dup[base] = (dup[base] || 0) + 1;
+            });
+
+            var order = levels.map(function (_lv, i) { return i; }).sort(function (a, b) {
+                var ha = (levels[a] && levels[a].height) || 0;
+                var hb = (levels[b] && levels[b].height) || 0;
+                if (ha !== hb) return hb - ha;
+                return ((levels[b] && levels[b].bitrate) || 0) - ((levels[a] && levels[a].bitrate) || 0);
+            });
+
+            function labelOf(idx) {
+                var lv = levels[idx] || {};
+                var base = lv.height
+                    ? lv.height + 'p'
+                    : Math.round((lv.bitrate || 0) / 1000) + 'kbps';
+                if (lv.height && dup[lv.height + 'p'] > 1) {
+                    base += ' · ' + Math.round((lv.bitrate || 0) / 1000) + 'kbps';
+                }
+                return base;
+            }
+
+            var items = [{ html: 'Auto', value: -1, default: hls.currentLevel === -1 }];
+            order.forEach(function (idx) {
+                items.push({ html: labelOf(idx), value: idx, default: hls.currentLevel === idx });
+            });
+
+            player.setting.add({
+                name: 'KPQuality',
+                html: 'Quality',
+                tooltip: hls.currentLevel === -1 ? 'Auto' : labelOf(hls.currentLevel),
+                selector: items,
+                onSelect: function (item) {
+                    var v = Number(item.value);
+                    hls.currentLevel = v;
+                    if (player.notice) player.notice.show = item.html + ' selected';
+                    return item.html;
+                }
+            });
+        }
+
+        /**
+         * সাবটাইটেল row for captions carried inside the HLS manifest — only
+         * when the resolver gave us no external files (one row, never two).
+         */
+        function addHlsSubtitleSetting(player, hls) {
+            if (!player || !player.setting || !hls) return;
+            if (player.kpExtSubs || player.kpSubRowAdded || player.kpHlsSubAdded) return;
+            var tracks = hls.subtitleTracks;
+            if (!tracks || !tracks.length) return;
+            player.kpHlsSubAdded = true;
+            player.kpSubRowAdded = true;
+
+            var items = [{ html: 'Off', value: -1, default: hls.subtitleTrack === -1 }];
+            for (var i = 0; i < tracks.length; i++) {
+                (function (idx) {
+                    var t = tracks[idx] || {};
+                    var label = t.name || t.label || ('Subtitle ' + (idx + 1));
+                    if (t.language && label.indexOf(t.language) === -1) label += ' (' + t.language + ')';
+                    items.push({ html: label, value: idx, default: hls.subtitleTrack === idx });
+                })(i);
+            }
+            var cur = items.filter(function (it) { return it.default; })[0];
+            player.setting.add({
+                name: 'KPSub',
+                html: 'Subtitles',
+                tooltip: cur ? cur.html : 'Off',
+                selector: items,
+                onSelect: function (item) {
+                    hls.subtitleTrack = Number(item.value);
+                    if (player.notice) player.notice.show = item.html;
                     return item.html;
                 }
             });
@@ -2759,6 +3006,11 @@ include_once './includes/header.php';
         // falling through to the entries after it).
         function useServer(server) {
             if (!server) return;
+            // Picking the Auto HD entry keeps the auto walk (extract → our
+            // player, iframe only as last resort); any other chip or menu
+            // entry is an explicit server choice and degrades to that
+            // server's own iframe when extraction fails.
+            autoHdMode = (!currentPrimary || server === currentPrimary);
             // An explicit pick is what gets remembered for this title.
             rememberServer(server.key);
 
@@ -2872,7 +3124,7 @@ include_once './includes/header.php';
 
             if (gateNote) {
                 gateNote.textContent = (payload && payload.mode === 'embed')
-                    ? 'বাইরের প্লেয়ার — নিচে SUB/DUB সার্ভার বদলাতে পারবেন।'
+                    ? 'External player — switch servers with SUB/DUB below.'
                     : '';
             }
         }
@@ -2911,7 +3163,7 @@ include_once './includes/header.php';
             resetWatchClock(resumeCache[epKey(ep)] || 0);
 
             if (autoplay) {
-                setState('loading', { message: 'EP ' + ep + ' এর সোর্স খোঁজা হচ্ছে…' });
+                setState('loading', { message: 'Finding sources for EP ' + ep + '…' });
             }
             if (chipsEl) {
                 chipsEl.innerHTML = '<span class="kp-chip-label"><i class="fas fa-spinner fa-spin"></i> Servers…</span>';
@@ -2996,7 +3248,7 @@ include_once './includes/header.php';
                     if (!data || !data.ok) {
                         if (chipsEl) chipsEl.innerHTML = '';
                         setState('error', {
-                            message: (data && data.message) || 'এই এপিসোডের জন্য কোনো সোর্স পাওয়া যায়নি।'
+                            message: (data && data.message) || 'No sources found for this episode.'
                         });
                         return;
                     }
@@ -3006,7 +3258,7 @@ include_once './includes/header.php';
                 .catch(function (err) {
                     console.error('resolve error', err);
                     if (chipsEl) chipsEl.innerHTML = '';
-                    setState('error', { message: 'নেটওয়ার্ক সমস্যা — stream endpoint-এ পৌঁছানো যায়নি।' });
+                    setState('error', { message: 'Network error — could not reach the stream endpoint.' });
                 });
         }
 
@@ -3457,7 +3709,7 @@ include_once './includes/header.php';
                 if (art && !isNaN(art.currentTime)) {
                     art.currentTime = Number(note.time) || 0;
                 } else {
-                    kpToast('এমবেড প্লেয়ারে নির্দিষ্ট সময়ে যাওয়া যায় না।', 'info');
+                    kpToast('Cannot seek to a specific time in the embed player.', 'info');
                 }
             });
 
@@ -3845,7 +4097,10 @@ include_once './includes/header.php';
             playsInline: true,
             theme: '#ff2e63',
             setting: true,
-            flip: true
+            flip: true,
+            pip: true,
+            autoMini: true,
+            lang: 'en'
         });
 
         // Same site-name watermark as the main player (custom player only —

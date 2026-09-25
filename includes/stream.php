@@ -346,17 +346,37 @@ function stream_chapter($chapter) {
  * NHD keys its anime pages by AniList id (verified: /anime/{anilist}/ep —
  * MAL/TMDB ids land on an empty "Player" shell), so the caller passes the
  * id it already resolved for the embed list. Returns null without one.
+ *
+ * Language aware: NHD's extraction API always answers with the /sub sibling,
+ * so DUB is served from zokoanime.video — NHD's own upstream, verified to
+ * carry a distinct dub stream on the very same hls CDN
+ * (/stream/ani/{anilist}/{ep}/dub). Both variants resolve through our
+ * resolver into the ArtPlayer; same chip, same key, so a remembered server
+ * pick survives a SUB↔DUB switch.
  */
-function stream_nhd_anime_server($anilistId, $episode) {
+function stream_nhd_anime_server($anilistId, $episode, $lang = 'sub') {
     $anilistId = (int)$anilistId;
     if ($anilistId <= 0) return null;
+    $episode = (int)$episode;
+
+    if (strtolower((string)$lang) === 'dub') {
+        return [
+            'key'      => 'nhd-anime',
+            'label'    => 'Auto HD',
+            'lang'     => 'dub',
+            'mode'     => 'embed',
+            'url'      => 'https://zokoanime.video/stream/ani/' . $anilistId . '/' . $episode . '/dub',
+            'dataLink' => null,
+            'primary'  => true,
+        ];
+    }
 
     return [
         'key'      => 'nhd-anime',
         'label'    => 'Auto HD',
         'lang'     => 'any',
         'mode'     => 'embed',
-        'url'      => 'https://nhdapi.com/anime/' . $anilistId . '/' . (int)$episode,
+        'url'      => 'https://nhdapi.com/anime/' . $anilistId . '/' . $episode,
         'dataLink' => null,
         'primary'  => true,
     ];
@@ -423,13 +443,11 @@ function stream_embed_servers($info, $episode, $lang, $healthCheck = true) {
     }
     if ($anilistId <= 0) return [];
 
-    // NHD leads the list: its URL resolves through our own player instead of
-    // an iframe. Marked primary so it also wins the pick when this list is
-    // the whole payload, and so the health filter below never drops it.
+    // MegaPlay leads the list: it answers in well under a second through our
+    // own relay and is the provider flagged primary, so it wins the first
+    // pick below. NHD comes next (also primary — the health filter must
+    // never drop it), then the plain fallbacks in config order.
     $out = [];
-    $nhd = stream_nhd_anime_server($anilistId, $episode);
-    if ($nhd) $out[] = $nhd;
-
     foreach (embed_providers() as $key => $provider) {
         $url = (string)($provider['url'] ?? '');
         if ($url === '') continue;
@@ -452,6 +470,9 @@ function stream_embed_servers($info, $episode, $lang, $healthCheck = true) {
             'primary'  => !empty($provider['primary']),
         ];
     }
+
+    $nhd = stream_nhd_anime_server($anilistId, $episode, $lang);
+    if ($nhd) $out[] = $nhd;
 
     if ($healthCheck) {
         $out = stream_filter_active_embeds($out);
