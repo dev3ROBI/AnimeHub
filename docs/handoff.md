@@ -1,7 +1,7 @@
 # AnimeHub — Handoff
 
 > Purpose: any future session (or dev) can pick up exactly where work stopped.
-> Last updated: 2026-09-24 (hover preview + shared watchlist modal + enhanced search & notifications).
+> Last updated: 2026-09-26 (browse-page design pass, mobile settings panel, Top-10 cover gap, Chinese captions + Chinese-platform extractor scaffold, dubbed-audio defaults + aggregator slot).
 
 ## 1. Project snapshot
 
@@ -10,6 +10,200 @@
 - **Repo:** `https://github.com/dev3ROBI/AnimeHub.git`, branch `main`.
 
 ## 2. Completed work
+
+### Follow-up: dub-first audio, id-aware embed templates, aggregator slot (IMPLEMENTED)
+
+**Asked:** add `hindi-dub-api`, MX Player API, Netmirror aggregator, TMDB-Embed-API and CNCVerse as providers "for better dubbed".
+
+**What survives contact with reality** (all checked live, 2026-09-26):
+- **8Stream (`8StreamApi`) — already integrated** and it is the only source we have that ships dub audio at all: each language is a separate HLS stream. Nothing to add.
+- **`hindi-dub-api`** — no such public API/project exists under that name. The conceptually closest documented thing is the *moviebox-internal-api* spec (m3u8 + an explicit "Hindi dub" audio selection) — i.e. a MovieBox scraper, not a callable public API.
+- **MX Player API** — Amazon MX Player exposes **no public API**; playback is Widevine-protected and India-region-locked. Not integrable server-side.
+- **TMDB-Embed-API (`Inside4ndroid`)** — real, but it is a **self-hosted Node app with an admin panel**. Usable only once *you* deploy it and hand over that host URL; it then behaves as one more iframe aggregator.
+- **CNCVerse-Cloud-Stream-Extension** — an **Android CloudStream extension repo, not an HTTP API**. Its `master` branch contains only assets (the built plugins ship from the `builds` branch), so there is no endpoint to call. Using it means re-implementing its scrapers one by one in PHP (Netmirror, CastleTv, DoFlix, Einthusan, MLSBD, MovieBox, Moviezwap, Pikashow, PlayFyTv, PlayZTV, TamilDhool, TamilUltra) — each needs a live-verified flow, and most are Cloudflare/DNS-gated for a foreign datacentre IP.
+- **Netmirror** — a streaming *site*, not an API; it is one of the things CNCVerse scrapes.
+
+**Therefore — the parts that are real code:**
+
+1. **Dub-first audio defaults** (`config/config.php` → `EIGHTSTREAM_AUDIO_PREF`, `includes/eightstream_api.php` → `eightstream_lang_preference()`). An unqualified request (`sub`/`dub`/none) previously always meant `['english','hindi']`. It now reads the comma-separated `EIGHTSTREAM_AUDIO_PREF` (default `English,Hindi,Bengali,Tamil,Telugu`), lowercased, with `english` appended as the guaranteed catch-all. A request that *names* a language still wins over the list. **Live-verified:** with `'Hindi,English,…'` set, `tt11737520` S1E2 (Hindi+English) resolves `lang=Hindi` while `tt1877830` (English/Bengali/Tamil/Telugu, no Hindi) still lands on `lang=English`.
+2. **`{imdb}` in embed templates + skip-what-we-cannot-fill** (`includes/embed_url.php`, new; `includes/embed_movie.php`, `includes/embed_tv.php`). `embed_fill_url()` resolves `{tmdb} {imdb} {season} {episode}` and returns `null` — so the provider is *dropped for that request* — when a placeholder has no value, when `{tmdb}` is `0`, when an unknown `{token}` is left over, or when the result is not `http(s)`. Previously a `{imdb}` template would have rendered a literal `{imdb}` into a broken iframe. `movie_embed_all($tmdb, $imdb='')` / `tv_embed_all($tmdb,$season,$ep,$imdb='')` gained the trailing optional arg; `movie_embed_resolve()` / `tv_embed_resolve()` now delegate to the `*_all()` builders so the two can never disagree. Callers pass `$detail['imdb_id']` (`includes/get_movie_stream.php`, `includes/get_tv_stream.php`, and the server-side fallback in `watch.php`).
+3. **Aggregator slot** (`config/config.php` → `$GLOBALS['EMBED_AGGREGATORS']`, `embed_merge_aggregators()` in `includes/embed_url.php`). Empty by default, so nothing changes until a URL is entered. Each entry takes `label`, `url` (movie template) and an optional `tv` template; `enabled => false` and `require_host` let a self-hosted instance stay dormant until it is actually deployed. Filled-in entries are spliced in **after `nhdapi`, before `vidfast`** — ahead of the generic mirrors because a dub-specialised aggregator is more likely to have the audio, but behind VidCore/NHD because those two are extractable by our own ArtPlayer. `{imdb}`-keyed entries drop out automatically on titles with no IMDb id.
+
+**Verified:** `php -l` clean on all 8 touched files · probe confirmed template fill/skips, merge position (movie and TV, incl. the `tv` template override) and both audio-preference orders · live 8Stream resolves above · `minify → --check` fresh.
+
+#### NetMirror scraper — investigated, NOT buildable (do not redo this)
+
+A NetMirror scraper was explicitly requested and then rejected on evidence. Probes, 2026-09-26, browser UA + full navigation headers:
+
+- **The official app page `netmirror.gg` (reached via `netmirror.app` 301) links to `https://net77.cc/home` as the web app.** That is the only authoritative pointer to the live domain.
+- `net77.cc/verify2` → **403 Cloudflare managed challenge** (`Just a moment…`, `challenges.cloudflare.com`). `net77.cc/home` and `/movie/550` → **522** (CF could not reach origin; origin flapping). Neither a plain HTTP client nor a JS-fingerprint emulation passes a managed challenge — it needs a real browser and a Turnstile token.
+- Every other guessable mirror is dead: `netmirror.xyz` → parked at `domains.atom.com`; `netmirror.one` → cPanel *Account Suspended*; `net52.cc`/`net11.cc` → 301 to net77.cc; and **`net33.cc` / `net44.cc` are parked domains serving a `router.parklogic.com` monetisation interstitial** (adblock test + fingerprint of timezone/GPU/`navigator.webdriver`, then a POST to the router). The base64 parameters on that page even name `"domainApex":"net33.cc", "tenant":"joe2"` — i.e. it is ParkLogic ad inventory, not NetMirror.
+- Net effect: not one NetMirror page is fetchable, so the whole chain (movie page → `data-id` → player config → signed m3u8) can never be verified from our host. A scraper written blind would be dead code that breaks silently.
+
+**If this is ever revisited**, the requirement is concrete: a mirror host that answers a plain `GET /movie/{tmdb}` **without** a Cloudflare managed challenge — either a mirror like that, or a proxy/VPS whose IP passes the challenge and can forward the player payload. The `EMBED_AGGREGATORS` slot (`config/config.php`) is the place that result goes in.
+
+### Follow-up: mobile settings panel, Top-10 poster gap, Chinese captions (IMPLEMENTED)
+
+**Asked:** in mobile view the player's settings panel was not responsive; the Top-10 rail on the home page left a gap under each cover; and (next in line) the site needs Chinese-platform extraction + working C-drama subtitles.
+
+**1. ArtPlayer settings panel on a phone** (`assets/css/watch_page_style.css`). Two separate clamps, both from how ArtPlayer lays the panel out — `position:absolute`, anchored to `right`, width driven by content:
+- **Width:** our rows carry an icon + label + a nowrap value (`Subtitle background … Default`), which on a phone is wider than the player, so the panel ran off the left edge and `.kp-player-shell { overflow:hidden }` cut it. Base rule now bounds `max-width: calc(100% - padding*2)`; on a phone the panel also pins **both** insets so it spans the player, and the *label* ellipsizes (never the value — that is the part that changes).
+- **Height:** a 16:9 player on a 390px phone is ~220px tall, and ArtPlayer's mobile default is 180px of panel + a 38px control bar, so the top rows were clipped. `max-height: calc(100% - var(--art-control-height) - 8px)` fits it to the space above the bar; rows are 44px (thumb target) and the panel scrolls.
+- The pop-up pickers (`.art-selector-list` under the CC/Server controls) are content-sized too and hang off a control near the right edge, so on a phone they get `max-width: min(calc(100vw - 24px), 320px)` — a percentage there would resolve against the tiny control box, hence viewport units.
+
+**2. Top-10 cover gap** (`assets/css/home.css`). `critical.css` ships `img[width][height]{height:auto}` for content images and `kp_img_attrs()` does emit those attributes — two attribute selectors out-specify `.kp-top10-poster img`, so `height:100%` lost and any poster that was not exactly 2:3 left the frame's background showing below it. The image is now `position:absolute; inset:0` inside the 2:3 frame (same guard the browse cards got), which resolves its height from the insets and cannot be out-voted.
+
+**3. Chinese captions** (`includes/subtitles_api.php`, `config/config.php`):
+- `SUBTITLES_LANGS` default is now **`eng,zho`** — the CC row offers English *and* Chinese when OpenSubtitles has both, instead of one language plus a duplicate.
+- `subtitles_pick()` had `break 2`, which exited the language loop after the first language: a second preferred language was never added. It is now one track per preferred language in order (up to `SUBTITLES_MAX`), with the second file of the same language used only when that language is the only one on offer (broken-upload insurance).
+- `subtitles_norm_lang()` maps bibliographic codes to terminological ones (`chi→zho`, `ger→deu`, …) — a track tagged `chi` otherwise never matched the preferred `zho`, which is exactly the track a C-drama needs.
+- `subtitles_to_utf8()` (new, called from `subtitles_to_vtt()`): BOM, then UTF-8 validity, then `mb_detect_encoding` over GB18030/Big5/SJIS/EUC-KR, plus a NUL-byte branch for BOM-less UTF-16. Verified with fixtures in UTF-8, GB18030, Big5 and UTF-16 — all four come out valid UTF-8 VTT with the Chinese text intact.
+
+**Verified live (2026-09-26):** the caption proxy answers `HTTP 200 text/vtt; charset=utf-8` with real cue times. Auto-CC **does** reach C-dramas: TMDB-searched titles → `The Untamed` `tt10554898` (19 rows), `Hidden Love` `tt28076458` (15), `Love Between Fairy and Devil` `tt14922556` (17), `Nirvana in Fire` `tt5141800` (10, and it *does* have a Chinese track → row shows English + Chinese), `Word of Honor`, `Story of Kunning Palace`, `Lost You Forever`, `The Double`, `Joy of Life`, `Empresses in the Palace` — all ≥4 rows, all English.
+> OpenSubtitles' Chinese coverage is thin (1 of those 10), which is the real argument for the platforms' own CC tracks.
+
+**4. Chinese-platform extractor (scaffolded — waiting on a key).** The user picked a third-party extractor, so the research was: iQIYI / Tencent-WeTV / Youku / MGTV / Sohu expose **no** public m3u8 API (signed per request, mostly Widevine, region-locked to CN) and **no** service in the catalogues covers them — checked TikHub's full OpenAPI (1050 paths) and JustOneAPI's (319): TikHub has Bilibili only (87 endpoints, incl. `fetch_video_playurl` + `fetch_video_subtitle`), JustOneAPI has Bilibili/Youku metadata only. Bilibili via TikHub is therefore the one documented pair that returns a stream **and** the platform's own CC track.
+
+What is now in place (`includes/cn_extract_api.php`, **new**):
+- `cnx_search()` (search → bvid, titles scored, misses cached), `cnx_video_ids()` (bvid → cid/aid), `cnx_playurl()` (→ m3u8, else progressive `.mp4`; 15-minute cache because playurls expire), `cnx_subtitles()` (platform CC → signed relay tracks, preferred-language ordered), `cnx_resolve()` and `cnx_source_entry()` (the same entry shape 8Stream uses, so the queue and chips need no special case).
+- Payloads are read defensively via `cnx_deep_first/strings/nodes` — these services move keys between versions and a missing field must degrade to "no source", never to a fatal.
+- Wired as a second custom-player source in `includes/get_movie_stream.php`, `includes/get_tv_stream.php` and `includes/stream.php` (anime, attempt 1.6), behind `CNEXTRACT_ENABLED` **and** a non-empty key, so the default install is byte-for-byte unaffected.
+- Caption plumbing: `subtitle_sign($url, $format)` now carries the conversion in the HMAC (`f=bilijson`), `subtitles_json_to_vtt()` turns Bilibili's `{body:[{from,to,content}]}` into WebVTT, the host gate accepts `*.hdslb.com`, and the proxy attaches the `Referer: https://www.bilibili.com/` that CDN demands (legacy no-`f` links still verify).
+
+**To go live:** `define('CNEXTRACT_KEY', '…')` in `config/config.local.php` (gitignored) and `CNEXTRACT_ENABLED` → true. `CNEXTRACT_LANGS` (default `zho,eng`) decides which platform captions are preferred.
+
+**Verified (no key yet, so nothing live was called):** `php -l` ✓ · the client returns null for every entry point while the key is empty (inert) ✓ · CC JSON → VTT with correct cue timing and UTF-8 Chinese ✓ · signed link round-trips, a tampered `f` is rejected, legacy links still verify ✓ · `*.hdslb.com` passes the gate while `hdslb.com.evil.tld` does not ✓.
+**Still to verify with the key:** the real response shapes (the deep readers are a first pass — the first keyed run should dump one raw payload and tighten them), and Bilibili's region-lock behaviour for a non-CN server.
+
+### Browse-page design pass: even card grid, filter badges, quiet player chrome (IMPLEMENTED)
+
+**Asked:** the Movies / Series / Anime pages still looked bad, upgrade the filter design (badge-like on desktop, select-like on mobile, options styled too), captions stayed on screen after switching subtitles off, the watermark should use the logo font at a lower opacity, no hover text on the player's menu icon, and the next-episode button icon removed.
+
+**1. Cards and rails (what "the design looks bad" actually was).** In `assets/css/home.css`:
+- the poster is now **pinned inside its 2:3 box** (`.movie-card .thumb-wrapper img { position:absolute; inset:0; object-fit:cover; object-position:center top }`). In flow, an image could still claim its own intrinsic height back on a square/wide poster and that is what ragged-nized a row.
+- every card in a row is now one height: `.show-item-con` / `.kp-cat-rail` use `align-items: stretch`, `.watch-item` is the flex wrapper (`.watch-item > .kp-card-link` fills it, `.kp-card-info` flexes, `.kp-card-meta` pins to the bottom).
+- `.kp-card-title` is clamped to **two lines with `min-height: 2.6em`**, so a long title neither pushes the meta line down nor leaves the neighbour looking shorter.
+- rail chrome: `.kp-rail` is a soft gradient card (`#2d2d33 → #212127`, radius 14, real shadow) and "View all" is a chip at the end of the heading instead of a stray link.
+
+**2. Filters — badges on a desktop, selects on a phone.** `.kp-filter-bar` keeps one markup (all three pages feed it `<select>`s):
+- a filter sitting on its "All …" default is a **quiet grey pill**; the moment it carries a value `select:has(option:checked:not([value=""]))` fills it with the brand colour (+ soft shadow). One glance at the row now says which filters are on.
+- `color-scheme: dark` on the select asks the engine for a **dark native picker list** — the only lever that styles `<option>` on Android/Safari — and the desktop list is themed explicitly (`option` background `#1b1b22`, `option:checked` pink).
+- on a phone they stay real full-width selects in a two-column grid (native picker under the thumb), with a small "Filters" caption above the row; `[data-theme="light"]` flips `color-scheme` back.
+
+**3. Player chrome (`watch.php`, `assets/css/watch_page_style.css`):**
+- **Turning subtitles off now clears the painted cue.** `mode = 'disabled'` only stops the *next* cuechange, so the line already on screen stayed until the video advanced. `applySub()` now also sets `art.subtitle.show = false` (ArtPlayer's stylesheet shows `.art-subtitle` only while `.art-subtitle-show` is set) and empties `art.template.$subtitle`; re-showing the same file calls `st.update()` so the cue returns at once instead of waiting for the next one.
+- **No hover bubbles anywhere.** ArtPlayer prints one for anything carrying a `tooltip` — including its own gear and fullscreen buttons (`Show Setting`). `kpKillHints()` strips the `hint--*` class (its stylesheet is `[class*=hint--][aria-label]:after`), keeping the `aria-label` so the buttons stay labelled for a screen reader. A debounced `MutationObserver` catches the chrome ArtPlayer builds later (the settings panel renders on demand). The helper is exported as `window.kpWatchHints` for the legacy player script, which runs outside the main IIFE. Settings **rows keep their right-hand value text** — that is a separate `<span>`, so Server / Quality / Subtitles still show what is selected.
+- **The extra bar icon is gone:** `fullscreenWeb` was removed from the options (the arrow-in-a-box button — the real fullscreen button next to it covers the same need).
+- **The bottom-bar CC button now lights up** while a caption track is active: `Controls` has no `.get()`, controls are plain properties (`art.controls['kp-cc']`), so `setCcOn()` had been a silent no-op.
+- the unused `KPIcons.next` entry was dropped.
+
+**4. Watermark.** It is now the navbar wordmark itself — the same `'Tangerine'` script and pink glow as `.logo span` — at `opacity: .45` (24px/`.4` under 480px) instead of a Poppins pill in a black box, which read like a UI badge sitting on the video.
+
+**Files:** `assets/css/home.css` (+min — card grid, rail chrome, filter bar), `assets/css/watch_page_style.css` (+min — watermark), `watch.php` (`applySub`, `kpKillHints`/`kpWatchHints`, `setCcOn`, `fullscreenWeb`, `KPIcons`).
+
+**Verified:** `php -l` ✓ · all three inline `watch.php` scripts extracted + `node --check` ✓ (also `category-rails.js`) · minify rebuilt + `--check` fresh ✓ · scratch probes removed.
+**Not verified:** an actual click-through in a browser (subtitle Off, CC light, hover with no bubble) — the behaviour above is read from ArtPlayer v5.4.0's own source (`Component.show` toggles `art-subtitle-show`; `.art-video-player.art-subtitle-show .art-subtitle{display:flex}`) rather than from a live session.
+
+### Player: 8Stream audio languages + CC + native ArtPlayer design (IMPLEMENTED)
+
+**Asked:** add more servers where our custom player can extract a playable link (the recently added 8Stream included), enhance the player UI, make CC + audio language always available, and bring the player back to the *original ArtPlayer* look (per its docs).
+
+**1. Audio language row.** 8Stream carries each audio language as its own HLS stream, so they are not hls.js tracks. `includes/eightstream_api.php` now returns the language list (`eightstream_language_titles`, `eightstream_episode_langs`) and each source entry carries `audio:[{label,lang,imdb,season,ep}]` + `audio_lang`. The player shows an **Audio** setting row; picking one calls the new `includes/get_eightstream_audio.php` (session-gated) and re-plays in place, preserving the playhead. Verified live: `tt1877830` → `[English, Bengali, Tamil, Telugu]`, `tt11737520` S1E2 → `[Hindi, English]`, and switching returns a **different** master m3u8.
+
+**2. CC always on the bar.** When a source has no caption track the CC control still renders (it notifies "No subtitles for this source") instead of vanishing; when tracks exist it behaves as before. The Subtitles row keeps its `icon`.
+
+**3. Original ArtPlayer design.** Removed the custom "designed pass" CSS overrides (control-bar gradient, button pills/hover, progress gradient, settings/volume panel styling) so ArtPlayer v5's **own injected stylesheet** renders — the brand colour comes from the `theme` option only. Our own additions (CC, Next, setting-row icons) now use inline SVG in the ArtPlayer house style (22px, `currentColor`, 2px round strokes) instead of FontAwesome `<i>` icons, so they blend with the built-ins.
+
+**4. Server list.** The in-player **Server** row keeps listing every source our own player can actually take over (`isCustomPlayer()` — 8Stream HLS + resolver-backed embeds), which is the criterion requested; iframe-only providers stay in the chips outside. (Each entry was relabelled "Auto HD", which hid 8Stream — see the newest section above.)
+
+**Files:** `includes/eightstream_api.php` (languages + `audio` on entries), `includes/get_eightstream_audio.php` (new), `includes/stream.php` (`audio`/`audio_lang` through the queue), `includes/get_movie_stream.php` + `includes/get_tv_stream.php` (entry already carried whole), `watch.php` (`KPIcons`, Audio row, `switchStreamAudio`, CC-always), `assets/css/watch_page_style.css` (+min).
+Verified: `php -l` ✓ · inline scripts extracted + `node --check` ✓ · minify rebuilt + `--check` fresh ✓ · per-language resolve returns distinct streams ✓.
+
+### 8Stream provider — movies / TV / anime in our own player (IMPLEMENTED)
+
+**What was asked:** add 8StreamApi (an HLS source) as another provider for movies/anime/TV, play it in our own ArtPlayer, give our player 100% priority, and — when nothing plays — show "our server doesn't have this title, click More servers".
+
+**How it resolves (verified live 2026-09-26):**
+1. a base site (allmovieland.*) serves `const AwsIndStreamDomain = '…'` → the rotating player host (`slast430did.com` currently);
+2. `GET {player}/play/{imdb}` → the page embeds a config object (`let p3 = {"file":…,"key":…}` for movies, `var pl = new HDVBPlayer({…})` for series);
+3. `GET {player}{file}` with `X-Csrf-Token: {key}` → languages (movie) or seasons→episodes→languages (series);
+4. `GET {player}/playlist/{leaf.slice(1)}.txt` with the token → the **master m3u8 URL**.
+
+**The catch (why a relay is mandatory):** that m3u8 only answers with the provider's own `Referer`/`Origin` (`https://1xcinema.net/`), and its token embeds the *requesting* IP (`:…:103.x.x.x:`). A browser on our origin can send neither — a bare GET 404s. So the URL handed to the client is always a **signed relay URL** (`includes/eightstream_relay.php`) that attaches the headers server-side and rewrites every child playlist/segment back through itself. Verified end-to-end: master → variant (664 KB) → segment `206 video/mp2t` (`47 40 11` TS sync).
+
+**Files:**
+| File | Change |
+|---|---|
+| `config/config.php` | `EIGHTSTREAM_*` switches; `$GLOBALS['EIGHTSTREAM_BASE_URLS']` (allmovieland.link/.fun/.com) + `EIGHTSTREAM_PLAYER_URLS` (slast430did.com) — tried in order |
+| `includes/eightstream_api.php` | **new** — player-domain discovery (cached), page/tree/leaf resolution, m3u8 probe, `eightstream_imdb_for()` (TMDB cross-lookup for anime, cached), `eightstream_source_entry()` |
+| `includes/eightstream_relay_lib.php` | **new** — HMAC sign/verify + public-host/media-path gate |
+| `includes/eightstream_relay.php` | **new** — attaches Referer/Origin, Range passthrough, playlist rewrite |
+| `includes/stream.php` | anime: `stream_try_eightstream()` added (after the ReAnime scraper, before embeds) — hls → our player |
+| `includes/get_movie_stream.php`, `includes/get_tv_stream.php` | prepend the 8Stream hls source into a `sources` queue, embeds behind it |
+| `watch.php` | `KP_NO_SOURCE_MSG` ("এই টাইটেলটি আমাদের সার্ভারে এখনো নেই — …More servers…"), `iframeFallback()` now returns false while Auto HD is active (no silent iframe drop) |
+
+**Priority model:** the source queue is `8Stream hls` → external embeds. `isCustomPlayer()` already treats a plain `hls` entry as ours, so Auto HD plays it in the ArtPlayer and the embeds move under **More servers**. When every custom source fails, Auto HD stops on `KP_NO_SOURCE_MSG` instead of auto-loading a foreign iframe.
+
+**Anime ordering:** the ReAnime scraper stays first (purpose-built anime source: sub/dub + captions) and 8Stream follows it; on a host without the self-hosted scraper the health check fails fast, so 8Stream becomes the de-facto primary. Move the `stream_try_eightstream()` block above the scraper in `stream_resolve()` to make 8Stream first. **To disable:** `EIGHTSTREAM_ENABLED false`.
+
+### Movies / Series category rails + new Anime page + player polish (IMPLEMENTED)
+
+**Asked:** enhance the TV and movie pages with categories (K-drama, C-drama and plenty more), one row on mobile and two on desktop, build a matching anime page, drop the icon-name tooltip in our player, and fix the watermark that was missing on many videos.
+
+**1. Category rails.** `includes/category_rails.php` (new) is the single table of every category: 15 for TV (K-Drama, C-Drama, J-Drama, Turkish, Thai, Filipino, Korean Shows, Anime Series, Crime & Mystery, Sci-Fi & Fantasy, Action & Adventure, Romance & Drama, Comedy, Reality, Documentary), 14 for movies (Korean/Chinese/Japanese/Hindi/Turkish, Animation, Action, Comedy, Romance, Horror, Thriller, Crime, Sci-Fi, Documentary) and 14 for anime (Trending, Popular, Airing Now, Top Rated + ten genres). Adding a row is one array entry in `kp_category_rails()`.
+- Cards are the site's own `render_anime_card()`, so a rail looks like every other section rather than a second design language.
+- **Lazy by default.** The first `KP_RAIL_EAGER` rails (2 — one on the anime page, where AniList answers slower) are resolved with the page; the rest ship as eight shimmer skeletons and are filled by `assets/js/category-rails.js` through `includes/category_items.php` as they come near the viewport — one request at a time, and a failed rail keeps its skeletons as tap-to-retry instead of collapsing and shifting the page. A dozen categories therefore cost one or two provider calls on first paint instead of a dozen.
+- TMDB rails go through `tmdb_movie_discover()` / `tmdb_tv_discover()` (already cached for an hour); anime rails through the catalogue layer (AniList → ReAnime → Jikan). *Top Rated* uses the new `kp_rail_top_rated()` — a `MediaSort: SCORE_DESC` query — because `anilist_by_genre()` always demands a genre.
+- **Two rows on a desktop, no sideways scrolling; one swipe row on a phone.** `.kp-cat-rail` is a plain grid whose column count is pinned per step — 6 columns (default), 5 (`<=1100px`), 4 (`<=900px`) — with the surplus cards hidden by `> *:nth-child(n + …)`, so a rail always shows exactly two rows and a short result set keeps the same card size as its neighbours (the column count never depends on how many cards came back). At `<=768px` it switches to a `flex` swipe row with fixed-width cards, the same pattern as the Top 10 rail. `.kp-rail-skel` is 12 shimmer cards sized like a real card (poster + info) so lazy loading cannot shift the page.
+- `KP_RAIL_LIMIT` is 12 (2 rows of 6) and `KP_RAIL_SKELETON` matches it, so the placeholder rows are exactly as tall as the loaded ones.
+- **Search and filters now share one card** on all three pages — two stacked boxes above the rails was noise.
+
+**2. New `anime.php`.** Same shape as `movies.php` / `tv.php` — notice, search + filters in one card, rails, then one paginated grid (`anilist_popular` / `catalog_by_genre` / `catalog_search`). Linked from the drawer right after Movies / Series.
+
+**3. Player polish.** Two fixes in `watch.php`:
+- The server chips no longer carry a `title` tooltip (the name that appeared on hover); the primary chip is still visually distinct through `.server-chip-primary`.
+- **Watermark.** It was hidden unless the state was exactly `playing`, so any re-resolve or audio switch on a slow source left playback with no watermark. `setState()` now hides it only for the gate and the error card, and it starts visible when mounted, so it is on screen whenever our own player owns the screen. It sits at `z-index: 60` (above the video and ArtPlayer's layers, below its control bar), has a stronger contrast pill and scales down under 480px. A foreign iframe still has none — `destroyPlayers()` takes the watermark down together with the player.
+
+**Files:** `includes/category_rails.php` (**new** — table, fetcher, renderer), `includes/category_items.php` (**new** — lazy JSON endpoint), `assets/js/category-rails.js` (+min) (**new**), `assets/css/home.css` (+min — `.kp-rails` / `.kp-rail` / `.kp-cat-rail` / skeleton), `movies.php` + `tv.php` (rails between the filters and the full grid), `anime.php` (**new**), `includes/header.php` (Anime drawer link + the new script), `watch.php` + `assets/css/watch_page_style.css` (chip tooltip, watermark).
+
+**Verified:** all three pages rendered with a faked session — 14 / 15 / 14 rails, correct eager-vs-lazy split, no notices; every rail resolved live (12–18 cards each, e.g. Korean Movies → *Colony*, K-Drama → *The Scandal*, anime Action → *Attack on Titan*); `php -l` ✓ · `node --check` incl. the new script ✓ · minify rebuilt + `--check` fresh ✓.
+
+### Server list shows 8Stream + Font Awesome player icons + auto English subtitles (IMPLEMENTED)
+
+**Asked:** 8Stream was not showing up in the server list, the player icons looked bad, and CC should fetch an English subtitle online whenever a source carries no real one.
+
+**1. "8Stream is missing" was a label bug, not a wiring bug.** `sources[0]` really is the 8Stream HLS entry — probed live: Breaking Bad (`tmdb:tv:1396`) and MobLand (`tmdb:tv:247718`, IMDb `tt31510819`) both resolve to a signed relay URL with `audio = English|Hindi`. But `serverBaseLabel()` relabelled *every* entry our own player can take over as the generic **"Auto HD"**, so the primary chip hid the provider name and the viewer only saw VidCore/NHD behind "More servers". An extracted source is now listed under its own provider name (`8Stream`, `VidCore`, `NHD`, `NHD`/`zokoanime`, `MegaPlay`, `Anikuro`, `ReAnime` — see `KP_PROVIDER_NAMES`), and `"Auto HD"` survives only as the fallback for an entry that carries no provider name. Each chip also gets a `title` ("Auto HD — plays in our own player" / "External player").
+
+> Not everything is fixable: **Business Proposal** (`tmdb:tv:154825`, IMDb `tt14819828`) genuinely 404s on `GET {player}/play/{imdb}` — 8Stream does not carry that title (allmovieland's own library gap). Its entry is therefore correctly absent and the queue falls through to VidCore/NHD; the existing `KP_NO_SOURCE_MSG` already covers the all-failed case. Verified against `tt1877830` / `tt0903747` / `tt11737520` / `tt31510819`, which all resolve fine.
+
+**2. Player icons.** The hand-drawn inline SVGs (`KPI_SVG` + `KPIcons`) were replaced with the site's Font Awesome set — the chips row already speaks `fas` — so the player chrome matches the rest of KitePlay instead of shipping a second icon language next to ArtPlayer's built-in SVGs: `fa-server`, `fa-volume-high`, `fa-closed-captioning`, `fa-gauge-high`, `fa-forward-step`. New `.kp-ic` CSS sizes each glyph into the same 22px slot the built-ins occupy (20px/15px in the settings panel, 19px in the control bar).
+
+**3. Auto English subtitles (no real CC → fetch one online).** New `includes/subtitles_api.php`:
+- lookup via the **keyless** OpenSubtitles v3 addon Stremio itself uses — `{base}/subtitles/movie/{imdb}.json` and `…/series/{imdb}:{season}:{episode}.json` (Wyzie and the OpenSubtitles REST API now both demand an API key, hence this one);
+- candidates are tried most-specific-first (requested episode → season 1 of the same episode, because anime rows are routinely filed there → the movie entry);
+- `subtitles_pick()` keeps the preferred languages (`SUBTITLES_LANGS`, default `eng`), ranks UTF-8 and non-HI/SDH files first, and only falls back to whatever the title has when the preferred language is absent — so a Korean drama still gets captions instead of an empty CC menu;
+- results (misses included) are cached in `api_cache` for `SUBTITLES_CACHE_TTL` (1 day), so an episode click costs one API round trip per title at most;
+- upstream URLs are never shipped to the browser: each one is HMAC-signed into `includes/subtitle_proxy.php`, which re-verifies the signature, re-checks the `*.strem.io` host gate (redirects re-checked on the *effective* URL), fetches the file and serves it as **WebVTT** (SRT → VTT conversion, BOM + CRLF normalised). The relay is needed because that CDN sends no `Access-Control-Allow-Origin`.
+
+The captions are attached by `subtitles_attach($payload, $imdb, $season, $episode)`, which is a no-op unless the payload is a **direct** (hls/mp4) source that came back with an empty `subtitles` list — an embed payload's captions belong to the foreign player. The first track is marked `default`, so English subtitles simply appear; the CC row and its Off/on switch behave exactly as they did for provider captions.
+
+**4. Switching server inside the player never dismisses ArtPlayer.** `useServer()` used to treat *any* non-primary pick as an explicit server choice, so choosing a server in the in-player **Server** menu turned "Auto HD" off and a failed extraction dropped straight to that server's iframe (ArtPlayer gone, foreign player on screen). The in-player row now calls `useServer(s, {fromPlayer: true})`, which keeps `autoHdMode` on — the pick is an ask for that server, not for a different kind of player — and reopens that entry's attempt budget (`delete resolverTried[url]`, `resolverSpent = 0`) so the server the viewer picked is genuinely extracted again instead of being carried past as "already tried" (which is what used to hand the screen to its iframe). A failed extraction therefore walks on inside our player. The iframe remains reachable exactly where it was intended: a chip in the row *outside* the player (**More servers**), where the click unmistakably means "open this embed".
+
+**Files:**
+| File | Change |
+|---|---|
+| `includes/subtitles_api.php` | **new** — search / pick / sign / SRT→VTT |
+| `includes/subtitle_proxy.php` | **new** — signed, host-gated caption relay |
+| `includes/get_movie_stream.php`, `includes/get_tv_stream.php` | build the response array, then `subtitles_attach($response, $imdb, [season, episode])` |
+| `includes/stream.php` | `stream_attach_sources()` → `stream_attach_subtitles()` (anime: IMDb via the existing `eightstream_imdb_for()` cross-lookup, season via `eightstream_season_for()`) |
+| `config/config.php` | `SUBTITLES_*` block (`AUTO_ENABLED`, `TIMEOUT`, `CACHE_TTL`, `RELAY_TTL`, `MAX`, `LANGS`, `API_BASE`) |
+| `watch.php` | `KPIcons` → Font Awesome, `KP_PROVIDER_NAMES` + `serverBaseLabel()` rework, chip `title`, `useServer(server, {fromPlayer})` |
+| `assets/css/watch_page_style.css` (+min) | `.kp-ic` sizing (replaces the `.kp-ctl svg` rule) |
+
+**Verified live (2026-09-26):** all three paths return English tracks — movie (`tt1877830`, The Batman), TV (`tt0903747` S1E1, `tt14819828` S1E1, `tt11737520` S1E2) and anime (`anilist:5114` → `tt1355642`); `subtitles_attach()` stamps both the payload and `sources[0]`; the proxy answers `HTTP 200 text/vtt` with real cue text (65 KB, `00:00:47.546 --> 00:00:49.966`). Endpoint-level check: Breaking Bad returns `sources[0] = 8Stream` (2 captions) followed by the embed chain, Business Proposal returns embeds only and no captions.
+
+**To disable:** `SUBTITLES_AUTO_ENABLED false` (nothing is fetched, the CC button behaves exactly as before).
+Verified: `php -l` ✓ · inline scripts extracted + `node --check` ✓ · minify rebuilt + `--check` fresh ✓.
 
 ### Hover preview + shared watchlist modal + enhanced search & notifications (IMPLEMENTED)
 

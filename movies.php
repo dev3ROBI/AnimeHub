@@ -9,6 +9,7 @@ if (!isset($_SESSION['userID'])) {
 include 'includes/db.php';
 include_once 'includes/functions.php';
 include_once 'includes/tmdb_movie_api.php';
+include_once 'includes/category_rails.php';
 include 'includes/header.php';
 
 $genreId  = isset($_GET['genre']) ? max(0, intval($_GET['genre'])) : 0;
@@ -95,15 +96,8 @@ function kp_movie_url($page = 1, $genreId = 0, $country = '', $year = 0, $lang =
 }
 ?>
 
-<style>
-.kp-filter-bar{display:flex;flex-wrap:wrap;gap:8px;padding:12px 16px;background:rgba(255,255,255,.04);border-radius:12px;margin:8px 0}
-.kp-filter-bar select{padding:8px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:#181a20;color:#eee;font-size:13px;cursor:pointer;outline:none;min-width:120px}
-.kp-filter-bar select:focus{border-color:#ff2e63}
-.kp-filter-bar .kp-filter-apply{padding:8px 18px;border-radius:8px;border:none;background:linear-gradient(135deg,#ff2e63,#d90429);color:#fff;font-weight:600;font-size:13px;cursor:pointer;transition:.2s}
-.kp-filter-bar .kp-filter-apply:hover{opacity:.85}
-.kp-filter-bar .kp-filter-reset{padding:8px 14px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:transparent;color:#aaa;font-size:13px;cursor:pointer;transition:.2s}
-.kp-filter-bar .kp-filter-reset:hover{border-color:#ff2e63;color:#ff2e63}
-</style>
+<?php /* The filter styles live in assets/css/home.css (.kp-filter-bar) so all
+         three browse pages stay identical. */ ?>
 
 <div class="home-index-con">
     <div class="notice-box-container">
@@ -117,16 +111,12 @@ function kp_movie_url($page = 1, $genreId = 0, $country = '', $year = 0, $lang =
         </div>
     </div>
 
-    <!-- Search -->
+    <!-- Search + filters in one card (two boxes above the rails was noise) -->
     <div class="show-container">
         <form method="get" action="./movies.php" class="kp-search-input-wrap">
             <i class="fas fa-search"></i>
             <input type="text" name="q" placeholder="Search movies..." value="<?= kp_e($search) ?>">
         </form>
-    </div>
-
-    <!-- Filter Bar -->
-    <div class="show-container">
         <div class="kp-filter-bar">
             <select id="f-genre" onchange="applyFilters()">
                 <option value="">All Genres</option>
@@ -157,6 +147,13 @@ function kp_movie_url($page = 1, $genreId = 0, $country = '', $year = 0, $lang =
             <button class="kp-filter-reset" onclick="location.href='./movies.php'">Reset</button>
         </div>
     </div>
+
+    <!--
+        Category rails — Korean / Chinese / Japanese / Hindi … plus the big
+        genres. The first couple are resolved with the page, the rest fill in
+        as they scroll into view (includes/category_rails.php).
+    -->
+    <?= kp_render_category_rails('movie') ?>
 
     <div class="show-container">
         <div class="head-show">

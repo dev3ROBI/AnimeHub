@@ -923,24 +923,38 @@
 }
 
 /* Site-name watermark — mounted inside the ArtPlayer root so it survives
-   fullscreen. Hidden unless the custom player is actually playing. */
+   fullscreen, and left visible whenever our own player owns the screen (see
+   setState() in watch.php; a foreign iframe has no watermark at all).
+   z-index sits above the video and ArtPlayer's layers/mask but under its
+   control bar, so it can never swallow a click.
+
+   The mark is the navbar wordmark itself: the same 'Tangerine' script and
+   pink glow as .logo span in nav_style.css, only faint — a chip-style box
+   with a Poppins label read like a UI badge sitting on the video, while a
+   low-opacity script reads like a broadcast watermark. */
 #kp-watermark {
   position: absolute;
-  top: 10px;
+  top: 8px;
   right: 14px;
-  z-index: 4;
+  z-index: 60;
   pointer-events: none;
   user-select: none;
-  font-family: 'Poppins', sans-serif;
-  font-size: 12.5px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  color: rgba(255, 255, 255, 0.78);
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
-  background: rgba(0, 0, 0, 0.34);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 7px;
-  padding: 3px 9px;
+  font-family: 'Tangerine', serif;
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1;
+  color: #ff4f7d;
+  opacity: 0.45;
+  text-shadow: 0 0 10px rgba(255, 46, 99, 0.85), 0 1px 4px rgba(0, 0, 0, 0.9);
+}
+
+@media (max-width: 480px) {
+  #kp-watermark {
+    top: 4px;
+    right: 8px;
+    font-size: 24px;
+    opacity: 0.4;
+  }
 }
 
 .kp-chip-label {
@@ -2280,76 +2294,116 @@ button.report-option {
 [data-theme="light"] .kp-report-cancel { color: #444; border-color: #c8c8d2; }
 
 /* ----------------------------------------------------------------------
-   ArtPlayer control bar � designed pass
+   ArtPlayer — native design pass
    ArtPlayer v5 injects its own stylesheet from JS (there is no separate
-   artplayer.css), so every rule below runs at .artplayer-app specificity
-   to win the cascade over the injected defaults.
+   artplayer.css), so the built-in chrome — control bar, buttons, progress,
+   settings/volume panels — is deliberately left alone and renders exactly
+   as the library ships it. The brand colour comes from the `theme` option
+   (set in watch.php), and only our own additions are styled here.
    ------------------------------------------------------------------ */
-.artplayer-app .art-controls {
-  background: linear-gradient(to top, rgba(8, 8, 14, 0.94) 0%, rgba(8, 8, 14, 0.58) 62%, rgba(8, 8, 14, 0) 100%);
-}
-.artplayer-app .art-controls .art-control {
-  border-radius: 7px;
-  margin: 0 1px;
-  color: rgba(244, 244, 248, 0.92);
-  transition: color 0.16s ease, background 0.16s ease, transform 0.16s ease;
-}
-.artplayer-app .art-controls .art-control:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.1);
-}
-.artplayer-app .art-controls .art-control:active {
-  transform: scale(0.93);
-}
-.artplayer-app .art-controls .art-control svg {
-  width: 19px;
-  height: 19px;
-}
-.artplayer-app .art-controls .art-control i {
-  display: inline-block;
-  width: 19px;
-  font-size: 17px;
-  line-height: 1;
-  text-align: center;
-}
-.artplayer-app .kp-ctl {
+/* NOTE: these used to be scoped to `.artplayer-app`, a class ArtPlayer never
+   puts on the container — nothing below it applied, which is why our Font
+   Awesome glyphs sat at the wrong size next to the built-in SVGs. The real
+   root is `.art-video-player`, inside our `#artplayer` box. */
+#artplayer .kp-ctl {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 19px;
-  height: 19px;
+  line-height: 1;
 }
+
+/* Our own rows and controls speak the site's Font Awesome set (the server
+   chips already do). A glyph is sized against ArtPlayer's own icon variables
+   and scaled down, because an SVG in a 36px box draws smaller than a letter
+   filling a 36px em box. The settings panel uses its own 24px slot. */
+#artplayer .kp-ic {
+  display: inline-block;
+  font-size: calc(var(--art-control-icon-size, 36px) * 0.62);
+  line-height: 1;
+  text-align: center;
+  vertical-align: middle;
+}
+
+#artplayer .art-settings .kp-ic {
+  font-size: calc(var(--art-settings-icon-size, 24px) * 0.85);
+}
+
 /* CC button lit while a caption track is active */
-.artplayer-app .art-controls .art-control.on,
-.artplayer-app .art-controls .art-control.on:hover {
+#artplayer .art-controls .art-control.on,
+#artplayer .art-controls .art-control.on:hover {
   color: #ff2e63;
 }
 
-/* Progress bar � brand gradient, lifts on hover */
-.artplayer-app .art-progress {
-  border-radius: 99px;
-}
-.artplayer-app .art-progress-played {
-  background: linear-gradient(90deg, #ff2e63 0%, #ff77a1 100%) !important;
-}
-.artplayer-app .art-control-progress:hover .art-progress {
-  height: 6px;
+/* ----------------------------------------------------------------------
+   ArtPlayer settings panel — fit it to the player
+
+   ArtPlayer lays the panel out as an absolutely positioned box anchored to
+   `right` with a *content-driven* width. Our rows carry an icon, a label and
+   a nowrap value ("Subtitle background … Default"), which on a phone is wider
+   than the player itself — the panel then runs off the left edge and the
+   shell clips it. On a phone the box is also taller than the player (16:9 =
+   ~200px here, and 180px of panel plus the 38px control bar does not fit), so
+   its top rows were cut off as well. Hence: bound the width, ellipsize the
+   label (never the value — that is the part that changes), and cap the height
+   to the space actually above the control bar.
+   ------------------------------------------------------------------ */
+#artplayer .art-settings {
+  /* `100%` here is the player box, so a long row can never push the panel
+     past it, on any screen size. */
+  max-width: calc(100% - (var(--art-padding) * 2));
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
-/* Settings + volume panels */
-.artplayer-app .art-setting-panel {
-  border-radius: 12px;
-  background: rgba(14, 14, 20, 0.97);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+/* The label gives way before the value does. */
+#artplayer .art-settings .art-setting-item-left {
+  min-width: 0;
+  flex: 0 1 auto;
 }
-.artplayer-app .art-volume-panel {
-  background: rgba(14, 14, 20, 0.97);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+
+#artplayer .art-settings .art-setting-item-left-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.artplayer-app .art-volume-slider .art-volume-inner {
-  background: #ff2e63;
+
+#artplayer .art-settings .art-setting-item-right {
+  flex: 0 0 auto;
 }
-.artplayer-app .art-notice-inner {
-  border-radius: 8px;
+
+@media (max-width: 768px) {
+  /* Pin both insets: the panel then spans the player instead of sizing itself
+     from the widest row. */
+  #artplayer .art-settings {
+    left: var(--art-padding);
+    right: var(--art-padding);
+    width: auto;
+    max-width: none;
+    /* Never taller than the room above the control bar. */
+    max-height: calc(100% - var(--art-control-height) - 8px);
+  }
+
+  /* Thumb-sized rows; ArtPlayer's own padding is 0 5px. */
+  #artplayer .art-settings .art-setting-item {
+    padding: 0 10px;
+    min-height: 44px;
+  }
+
+  #artplayer .art-setting-item-left-text {
+    font-size: 12.5px;
+  }
+
+  /* The pop-up pickers under a control (Server / Audio / Subtitles / Quality)
+     are sized by their content too, and the control they hang off sits near
+     the right edge — so a 20-language list would be clipped. Bound them to
+     the viewport (a percentage here would resolve against the tiny control
+     box they belong to, which is why this is not `100%`). */
+  #artplayer .art-control-selector .art-selector-list {
+    max-width: min(calc(100vw - 24px), 320px);
+  }
+
+  #artplayer .art-selector-list .art-selector-item {
+    padding: 12px 16px;
+  }
 }

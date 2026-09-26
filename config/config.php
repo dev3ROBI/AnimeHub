@@ -229,6 +229,111 @@ if (!function_exists('catalog_order')) {
     }
 }
 
+// ─── 8Stream provider (native PHP) ────────────────────────────────────
+// A movie/series source keyed by IMDb id. Its player page ships a signed
+// `file` + `key`; fetching them yields a rotating HLS host whose master
+// playlist only answers with the player's own Referer/Origin *and* a token
+// bound to the requesting IP — so a browser on our origin can never play it
+// directly and the bytes are proxied back through
+// includes/eightstream_relay.php (same arrangement as MegaPlay).
+if (!defined('EIGHTSTREAM_ENABLED'))    define('EIGHTSTREAM_ENABLED', true);
+if (!defined('EIGHTSTREAM_TIMEOUT'))    define('EIGHTSTREAM_TIMEOUT', 8);    // seconds per upstream hop
+if (!defined('EIGHTSTREAM_CACHE_TTL'))  define('EIGHTSTREAM_CACHE_TTL', 1800); // resolved m3u8 (seconds)
+if (!defined('EIGHTSTREAM_VERIFY'))     define('EIGHTSTREAM_VERIFY', true);   // Range-probe the media URL first
+
+/**
+ * Audio-track order when a request does not name a language (the normal
+ * case: `sub`/`dub`/empty). 8Stream serves every audio as its *own* HLS
+ * stream, so the first name here that exists wins — putting "Hindi" first
+ * makes dubbed titles open in Hindi for the Indian audience, English stays
+ * the fallback. A request that names a language still overrides this list.
+ */
+if (!defined('EIGHTSTREAM_AUDIO_PREF')) {
+    define('EIGHTSTREAM_AUDIO_PREF', 'English,Hindi,Bengali,Tamil,Telugu');
+}
+
+/**
+ * Base sites tried in order. Each one serves the rotating player hostname via
+ * `const AwsIndStreamDomain = '…'`; the first that answers wins.
+ */
+if (!isset($GLOBALS['EIGHTSTREAM_BASE_URLS'])) {
+    $GLOBALS['EIGHTSTREAM_BASE_URLS'] = [
+        'https://allmovieland.link',
+        'https://allmovieland.fun',
+        'https://allmovieland.com',
+    ];
+}
+
+/**
+ * Player domains probed directly (and as extra candidates if every base is
+ * down). Tried *after* whatever the bases hand back, so a live base wins.
+ */
+if (!isset($GLOBALS['EIGHTSTREAM_PLAYER_URLS'])) {
+    $GLOBALS['EIGHTSTREAM_PLAYER_URLS'] = [
+        'https://slast430did.com',
+    ];
+}
+
+/**
+ * Relay request headers. The media CDN demands the provider's own origin as
+ * Referer/Origin; the relay attaches them server-side. Read from config.local.php
+ * (gitignored) if you need to override the learned referer.
+ */
+if (!defined('EIGHTSTREAM_RELAY_TTL'))  define('EIGHTSTREAM_RELAY_TTL', 21600); // 6h
+
+// ─── Online subtitles (auto English CC) ───────────────────────────────
+// When a source ships no caption track of its own, the server looks the title
+// up on the OpenSubtitles v3 addon Stremio itself uses
+// (opensubtitles-v3.strem.io — still keyless, unlike Wyzie/OpenSubtitles REST)
+// and hands our own player a *signed* URL on includes/subtitle_proxy.php. The
+// proxy re-verifies the HMAC, fetches the file from the caption CDN and serves
+// it as WebVTT, so nothing depends on that CDN's CORS headers.
+//
+// Nothing is fetched for a source that already carries captions; the settings
+// below only govern the fallback.
+if (!defined('SUBTITLES_AUTO_ENABLED')) define('SUBTITLES_AUTO_ENABLED', true);
+if (!defined('SUBTITLES_TIMEOUT'))      define('SUBTITLES_TIMEOUT', 6);      // seconds per lookup
+if (!defined('SUBTITLES_CACHE_TTL'))    define('SUBTITLES_CACHE_TTL', 86400); // one day (misses included)
+if (!defined('SUBTITLES_RELAY_TTL'))    define('SUBTITLES_RELAY_TTL', 21600); // signed proxy link
+if (!defined('SUBTITLES_MAX'))          define('SUBTITLES_MAX', 3);          // tracks offered in the CC row
+
+/** Preference order, ISO-639-2 (comma separated). English first; the other
+ *  languages are only used when the preferred one has nothing.
+ *
+ *  Chinese is listed too because C-dramas ship their own track far more often
+ *  than an English one — with both in the list the CC row offers English *and*
+ *  Chinese instead of silently settling for whichever exists. */
+if (!defined('SUBTITLES_LANGS'))        define('SUBTITLES_LANGS', 'eng,zho');
+
+/** Lookup base — point at a mirror if the addon ever moves. */
+if (!defined('SUBTITLES_API_BASE'))     define('SUBTITLES_API_BASE', 'https://opensubtitles-v3.strem.io');
+
+// ─── Chinese-platform extractor (third-party, keyed) ─────────────────
+// iQIYI / Tencent-WeTV / Youku / MGTV / Sohu publish no stream API: their
+// playurls are signed per request, mostly Widevine-protected and region-locked
+// to CN, so there is nothing to scrape reliably from this server. The workable
+// route is a keyed extractor service, which is what this block points at.
+//
+// The client (includes/cn_extract_api.php) speaks TikHub's documented Bilibili
+// endpoints — the one Chinese pair that returns *both* a playurl and the
+// platform's own CC tracks (`fetch_video_playurl` + `fetch_video_subtitle`).
+// It stays completely inert while CNEXTRACT_KEY is empty, so a half-set-up
+// install cannot break a page.
+//
+// Setup: put the key in config.local.php (never in git):
+//     define('CNEXTRACT_KEY', '…');
+// then flip CNEXTRACT_ENABLED to true.
+if (!defined('CNEXTRACT_ENABLED'))   define('CNEXTRACT_ENABLED', false);
+if (!defined('CNEXTRACT_KEY'))       define('CNEXTRACT_KEY', '');
+if (!defined('CNEXTRACT_BASE_URL'))  define('CNEXTRACT_BASE_URL', 'https://api.tikhub.io');
+if (!defined('CNEXTRACT_TIMEOUT'))   define('CNEXTRACT_TIMEOUT', 12);    // seconds per call
+if (!defined('CNEXTRACT_CACHE_TTL')) define('CNEXTRACT_CACHE_TTL', 1800);// playurl(cached shorter below)
+if (!defined('CNEXTRACT_RELAY_TTL')) define('CNEXTRACT_RELAY_TTL', 21600);// signed subtitle link
+
+/** Preferred caption languages for platform CC, ISO-639-2, in order. Chinese
+ *  first — it is the platform's own track and the one a C-drama needs most. */
+if (!defined('CNEXTRACT_LANGS'))     define('CNEXTRACT_LANGS', 'zho,eng');
+
 // ─── Movie embed providers (fallback chain) ──────────────────────────
 if (!isset($GLOBALS['MOVIE_EMBED_PROVIDERS'])) {
     $GLOBALS['MOVIE_EMBED_PROVIDERS'] = [
@@ -279,4 +384,65 @@ if (!isset($GLOBALS['TV_EMBED_PROVIDERS'])) {
         '2embed-skin'  => ['label' => '2Embed',     'url' => 'https://www.2embed.skin/embedtv/{tmdb}&s={season}&e={episode}'],
         '2embed-cc'    => ['label' => '2Embed (cc)','url' => 'https://www.2embed.cc/embedtv/{tmdb}&s={season}&e={episode}'],
     ];
+}
+
+// ─── Dubbed-content aggregators (optional, off until a URL is filled in) ─
+//
+// A slot for an *aggregator you run or trust* that carries the dubbed audio
+// the mainstream mirrors lack (Hindi/Tamil/Telugu). Two things it is not:
+//
+//  * Unlike VidCore/NHD these are plain iframes, so they show up under
+//    "More servers" — they can never outrank a source our own ArtPlayer
+//    extracts (8Stream / the Chinese extractor).
+//  * A public aggregator needs an instance URL. A self-hosted one
+//    (e.g. Inside4ndroid's TMDB-Embed-API, which is Node + an admin panel)
+//    only works once *you* have deployed it and put that host here.
+//
+// Fill in `url` and the entry joins both movie and TV lists automatically,
+// right after the custom-player pair. `tv` overrides the TV template when the
+// aggregator uses a different path. Templates accept {tmdb} {imdb} {season}
+// {episode} — an entry whose template needs an id we do not have for a title
+// (say {imdb} on a title with no IMDb id) is skipped for that title instead of
+// loading a broken frame.
+if (!isset($GLOBALS['EMBED_AGGREGATORS'])) {
+    $GLOBALS['EMBED_AGGREGATORS'] = [
+        /*
+         * Self-hosted example — leave the URL empty until your instance is up:
+         *
+         * 'tmdb-embed-api' => [
+         *     'label' => 'Dubbed',
+         *     'url'   => 'https://YOUR-HOST/embed/movie/{tmdb}',
+         *     'tv'    => 'https://YOUR-HOST/embed/tv/{tmdb}/{season}/{episode}',
+         * ],
+         *
+         * A dub-first mirror that keys on IMDb instead of TMDB:
+         *
+         * 'dub-mirror' => [
+         *     'label' => 'Hindi Dub',
+         *     'url'   => 'https://your-dub-host/embed/{imdb}',
+         *     'tv'    => 'https://your-dub-host/embed/{imdb}/{season}/{episode}',
+         * ],
+         */
+    ];
+}
+
+// Merge the aggregators in (a no-op while the block above is empty).
+if ($GLOBALS['EMBED_AGGREGATORS'] && !empty($GLOBALS['MOVIE_EMBED_PROVIDERS'])) {
+    include_once __DIR__ . '/../includes/embed_url.php';
+
+    $movieAggs = [];
+    $tvAggs    = [];
+    foreach ($GLOBALS['EMBED_AGGREGATORS'] as $slug => $agg) {
+        if (!is_array($agg)) continue;
+        $movieAggs[$slug] = $agg;
+        if (!empty($agg['tv'])) {
+            $agg['url'] = $agg['tv'];
+            unset($agg['tv']);
+        }
+        $tvAggs[$slug] = $agg;
+    }
+
+    // → behind VidCore/NHD (our own player), ahead of the generic mirrors.
+    $GLOBALS['MOVIE_EMBED_PROVIDERS'] = embed_merge_aggregators($GLOBALS['MOVIE_EMBED_PROVIDERS'], $movieAggs, 'vidfast');
+    $GLOBALS['TV_EMBED_PROVIDERS']    = embed_merge_aggregators($GLOBALS['TV_EMBED_PROVIDERS'], $tvAggs, 'vidfast');
 }

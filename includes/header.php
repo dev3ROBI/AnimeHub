@@ -141,6 +141,8 @@ include_once __DIR__ . '/performance.php';
     <script src="<?= htmlspecialchars(kp_asset('js', 'card-preview.js'), ENT_QUOTES, 'UTF-8') ?>" defer></script>
     <script src="<?= htmlspecialchars(kp_asset('js', 'home-sections.js'), ENT_QUOTES, 'UTF-8') ?>" defer></script>
     <script src="<?= htmlspecialchars(kp_asset('js', 'genre-scroll.js'), ENT_QUOTES, 'UTF-8') ?>" defer></script>
+    <!-- Category rails: fills the rails Movies/Series/Anime defer to the client -->
+    <script src="<?= htmlspecialchars(kp_asset('js', 'category-rails.js'), ENT_QUOTES, 'UTF-8') ?>" defer></script>
     <!-- Release countdown chips (.kp-cd[data-release]) — ticks while pending, fires `kp:released` at zero -->
     <script src="<?= htmlspecialchars(kp_asset('js', 'countdown.js'), ENT_QUOTES, 'UTF-8') ?>" defer></script>
 </head>
@@ -264,6 +266,7 @@ if (!empty($_SESSION['userID'])) {
 
             <li onclick="window.location.href='movies.php'"><i class="fas fa-clapperboard" style="width: 25px;"></i> Movies</li>
             <li onclick="window.location.href='tv.php'"><i class="fas fa-tv" style="width: 25px;"></i> Series</li>
+            <li onclick="window.location.href='anime.php'"><i class="fas fa-dragon" style="width: 25px;"></i> Anime</li>
 
             <li class="drawer-divider"></li>
 

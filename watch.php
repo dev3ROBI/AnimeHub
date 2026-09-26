@@ -67,10 +67,10 @@ if ($is_api) {
             $episodes_list = $anime_data['episodes_list'] ?? [];
             // Set embed URL server-side for direct fallback
             if (function_exists('movie_embed_resolve')) {
-                $embedData = movie_embed_resolve($tmdb_movie_id);
+                $embedData = movie_embed_resolve($tmdb_movie_id, $anime_data['imdb_id'] ?? '');
                 $video_url = $embedData['url'] ?? null;
             }
-            $embedServers = function_exists('movie_embed_all') ? movie_embed_all($tmdb_movie_id) : [];
+            $embedServers = function_exists('movie_embed_all') ? movie_embed_all($tmdb_movie_id, $anime_data['imdb_id'] ?? '') : [];
         }
     } elseif ($is_tmdb_tv) {
         // TMDB TV route
@@ -91,10 +91,10 @@ if ($is_api) {
             $episodes_list = $anime_data['episodes_list'] ?? [];
             // Set embed URL server-side for direct fallback
             if (function_exists('tv_embed_resolve')) {
-                $embedData = tv_embed_resolve($tmdb_tv_id, $season_id, $start_episode);
+                $embedData = tv_embed_resolve($tmdb_tv_id, $season_id, $start_episode, $anime_data['imdb_id'] ?? '');
                 $video_url = $embedData['url'] ?? null;
             }
-            $embedServers = function_exists('tv_embed_all') ? tv_embed_all($tmdb_tv_id, $season_id, $start_episode) : [];
+            $embedServers = function_exists('tv_embed_all') ? tv_embed_all($tmdb_tv_id, $season_id, $start_episode, $anime_data['imdb_id'] ?? '') : [];
         }
     } elseif ($provider === 'anikuro') {
         $session = anikuro_session_from_id($raw_id);
@@ -1307,6 +1307,87 @@ include_once './includes/header.php';
         const embedBox   = document.getElementById('embedplayer');
         const embedFrame = document.getElementById('embed-frame');
         const artBox     = document.getElementById('artplayer');
+        // Shown when every source fails while Auto HD is active — our own
+        // player could not play the title, so point at the server chips.
+        const KP_NO_SOURCE_MSG = 'এই টাইটেলটি আমাদের সার্ভারে এখনো নেই — নিচের "More servers" থেকে অন্য সার্ভার Try করুন।';
+
+        // Icons for our own rows and controls. These reuse the site's Font
+        // Awesome set — the server chips already speak `fas` — so the player
+        // chrome matches the rest of KitePlay instead of shipping a second,
+        // hand-drawn icon language next to ArtPlayer's built-in SVGs. The
+        // `.kp-ic` class (watch_page_style.css) sizes each glyph into the same
+        // slot the built-in icons occupy.
+        const KPIcons = {
+            server:   '<i class="kp-ic fas fa-server"></i>',
+            audio:    '<i class="kp-ic fas fa-volume-high"></i>',
+            subtitle: '<i class="kp-ic fas fa-closed-captioning"></i>',
+            quality:  '<i class="kp-ic fas fa-gauge-high"></i>',
+            cc:       '<i class="kp-ic fas fa-closed-captioning"></i>'
+        };
+
+        /**
+         * ArtPlayer paints a hover bubble for anything that carries a `tooltip`,
+         * and that includes its own gear / fullscreen buttons. The bar here is
+         * icon-only on purpose, so the hint class is stripped the moment it
+         * exists — including on the chrome ArtPlayer builds later (the settings
+         * panel renders on demand), which is what the observer is for.
+         *
+         * The settings rows keep their right-hand value text: that is a
+         * separate <span>, not a hint, so a server or quality row still shows
+         * what is currently selected.
+         */
+        function kpKillHints(root) {
+            if (!root || !root.querySelectorAll) return;
+            // The bubble needs the `hint--*` class (its stylesheet is
+            // [class*=hint--][aria-label]:after). Dropping the class kills the
+            // bubble and keeps the aria-label, so the player stays usable with
+            // a screen reader.
+            var els = root.querySelectorAll('[class*="hint--"]');
+            for (var i = 0; i < els.length; i++) {
+                var el = els[i];
+                var cls = el.getAttribute('class');
+                // Guarded: an element already free of hint classes is left
+                // alone, so the observer below cannot re-queue itself.
+                if (!cls || cls.indexOf('hint--') === -1) continue;
+                el.setAttribute('class', cls.split(/\s+/).filter(function (c) {
+                    return c.indexOf('hint--') !== 0;
+                }).join(' '));
+            }
+        }
+
+        var kpHintObserver = null;
+        var kpHintTimer = null;
+
+        function kpWatchHints(player) {
+            try {
+                var host = (player.template && player.template.$player) || player.$player;
+                if (!host) return;
+                kpKillHints(host);
+                if (kpHintObserver) { kpHintObserver.disconnect(); kpHintObserver = null; }
+                if (typeof MutationObserver !== 'function') return;
+                kpHintObserver = new MutationObserver(function () {
+                    if (kpHintTimer) return;
+                    kpHintTimer = setTimeout(function () {
+                        kpHintTimer = null;
+                        kpKillHints(host);
+                    }, 80);
+                });
+                kpHintObserver.observe(host, {
+                    childList: true,
+                    subtree: true,
+                    attributes: true,
+                    attributeFilter: ['class', 'aria-label', 'data-hint']
+                });
+            } catch (e) {}
+        }
+
+        // The legacy player script (below) runs outside this IIFE but wants the
+        // same bubble-free bar.
+        window.kpWatchHints = kpWatchHints;
+
+        // Which 8Stream audio language is playing (matches a label in the
+        // current entry's `audio` list) — reset with every new payload.
+        let currentAudioLang = null;
 
         const gateEl        = document.getElementById('kp-gate');
         const gateBg        = document.getElementById('kp-gate-bg');
@@ -1348,10 +1429,12 @@ include_once './includes/header.php';
         // Auto HD (the default) prefers OUR player: embed entries the
         // resolver cannot take over are skipped while the walk still has
         // servers to try, and an iframe only appears once extraction is
-        // exhausted. useServer() flips the mode off when an explicit
-        // non-primary chip or menu entry is picked for that run.
+        // exhausted. useServer() flips the mode off only for a chip clicked in
+        // the row *outside* the player ("More servers") — a pick from the
+        // in-player Server menu keeps it on, so switching server there never
+        // dismisses ArtPlayer in favour of a foreign iframe.
         let autoHdMode = true;
-        let currentPrimary = null;    // queue entry the Auto HD chip stands for
+        let currentPrimary = null;    // queue entry the primary chip stands for
         let entryTried = Object.create(null);   // queue index → started this run
         let iframeTried = Object.create(null);  // embed url → iframe already shown
         let playToken = 0;
@@ -1490,9 +1573,13 @@ include_once './includes/header.php';
             toggle(loadingEl, state === 'loading');
             toggle(errorEl, state === 'error');
 
-            // Watermark is ours only while our own player is on screen.
+            // The watermark belongs to our own player only — destroyPlayers()
+            // takes it down with the player, so a foreign iframe never wears
+            // one. While it does exist it stays visible through everything but
+            // the poster and the error card: a re-resolve or an audio switch
+            // used to blink it away on sources that took a moment to start.
             var wm = document.getElementById('kp-watermark');
-            if (wm) wm.style.display = (state === 'playing') ? 'block' : 'none';
+            if (wm) wm.style.display = (state === 'gate' || state === 'error') ? 'none' : 'block';
 
             if (state === 'error' && errorText) {
                 errorText.textContent = opts.message || 'Something went wrong.';
@@ -1814,27 +1901,6 @@ include_once './includes/header.php';
             if (nextTimer) { clearInterval(nextTimer); nextTimer = null; }
         }
 
-        /**
-         * Bottom-bar control: jump straight to the next episode (the same
-         * target the end-of-episode overlay uses).
-         */
-        function addNextEpisodeControl(player) {
-            if (!player || !player.controls || player.kpNextAdded) return;
-            player.kpNextAdded = true;
-            player.controls.add({
-                name: 'kp-next',
-                position: 'left',
-                index: 11,
-                html: '<span class="kp-ctl kp-ctl-next"><i class="fas fa-forward-step"></i></span>',
-                tooltip: 'Next episode',
-                click: function () {
-                    var nx = computeNextEpisode();
-                    if (nx && nx.url) { window.location.href = nx.url; }
-                    else if (player.notice) { player.notice.show = 'No next episode'; }
-                }
-            });
-        }
-
         // ─── HLS playback via Artplayer ─────────────────────────────
         // `token` identifies this attempt: every failure path below reports
         // through handleSourceFailure(token, …), which ignores callbacks that
@@ -1863,7 +1929,9 @@ include_once './includes/header.php';
                 volume: 0.6,
                 autoplay: true,
                 fullscreen: true,
-                fullscreenWeb: true,
+                // No "web fullscreen" button: the bar is icon-only and that
+                // arrow-in-a-box glyph is the odd one out (the real fullscreen
+                // button next to it already covers the same need).
                 playbackRate: true,
                 aspectRatio: true,
                 mutex: true,
@@ -1937,6 +2005,8 @@ include_once './includes/header.php';
             if (subs.length) { art.kpExtSubs = true; }
 
             mountWatermark(art);
+            // Icon bar, no hover bubbles — see kpKillHints().
+            kpWatchHints(art);
 
             // Nothing rendered in 20s (dead manifest, blank player) → next source.
             sourceWatchdog = setTimeout(function () {
@@ -1950,7 +2020,6 @@ include_once './includes/header.php';
                 setState('playing');
                 playerActive = true;
                 addPlayerSettings(art);
-                addNextEpisodeControl(art);
                 if (art.hlsInstance) {
                     addAudioTrackSetting(art, art.hlsInstance);
                     addQualitySetting(art, art.hlsInstance);
@@ -2009,19 +2078,37 @@ include_once './includes/header.php';
                 art.once('ready', function () {
                     art.kpSubRowAdded = true;
 
+                    // Switching captions off has to take the *painted* cue with
+                    // it: `mode = 'disabled'` only stops the next cuechange, so
+                    // the line already on screen stayed there until the video
+                    // advanced. ArtPlayer draws the cue itself and only shows
+                    // that layer while `subtitle.show` is true (its stylesheet
+                    // hides .art-subtitle otherwise), so flip that too and wipe
+                    // the node — nothing can survive the switch.
                     function applySub(sub) {
                         try {
-                            if (!sub) {   // বন্ধ — hide without dropping the track
-                                var off = art.subtitle && art.subtitle.textTrack;
+                            var st = art.subtitle;
+                            if (!st) return;
+                            var cueEl = art.template && art.template.$subtitle;
+
+                            if (!sub) {   // বন্ধ — hide the layer, drop the cue
+                                var off = st.textTrack;
                                 if (off) off.mode = 'disabled';
+                                if (cueEl) cueEl.innerHTML = '';
+                                st.show = false;
                                 return;
                             }
-                            var cur = art.subtitle && art.subtitle.textTrack;
-                            if (cur && cur.mode === 'disabled' && art.subtitle.url === sub.url) {
+
+                            st.show = true;
+                            var cur = st.textTrack;
+                            if (cur && st.url === sub.url) {
                                 cur.mode = 'hidden';   // same file — just re-show
+                                // Repaint at once: re-enabling a track fires no
+                                // cuechange until the cue itself changes.
+                                if (typeof st.update === 'function') st.update();
                                 return;
                             }
-                            art.subtitle.url = sub.url;
+                            st.url = sub.url;          // new file → fresh track
                         } catch (e) {}
                     }
 
@@ -2036,6 +2123,7 @@ include_once './includes/header.php';
                     art.setting.add({
                         name: 'KPSub',
                         html: 'Subtitles',
+                        icon: KPIcons.subtitle,
                         tooltip: preferredSub ? (preferredSub.language || 'Subtitle') : 'Off',
                         selector: subItems,
                         onSelect: function (item) {
@@ -2056,7 +2144,9 @@ include_once './includes/header.php';
                     // control lights up while a caption track is active.
                     function setCcOn(on) {
                         try {
-                            var el = art.controls && art.controls.get && art.controls.get('kp-cc');
+                            // Controls are plain properties on the controller
+                            // (`art.controls['kp-cc']`) — there is no .get().
+                            var el = art.controls && art.controls['kp-cc'];
                             if (el) el.classList.toggle('on', !!on);
                         } catch (e) {}
                     }
@@ -2064,7 +2154,7 @@ include_once './includes/header.php';
                         name: 'kp-cc',
                         position: 'right',
                         index: 31,
-                        html: '<span class="kp-ctl kp-ctl-cc"><i class="fas fa-closed-captioning"></i></span>',
+                        html: '<span class="kp-ctl kp-ctl-cc">' + KPIcons.cc + '</span>',
                         tooltip: preferredSub ? (preferredSub.language || 'Subtitle') : 'Off',
                         selector: subItems,
                         onSelect: function (item) {
@@ -2115,6 +2205,22 @@ include_once './includes/header.php';
                             });
                             if (art.notice) art.notice.show = 'Subtitle background: ' + item.html;
                             return item.html;
+                        }
+                    });
+                });
+            } else {
+                // This source carries no caption track, but the CC control stays
+                // on the bar anyway — it explains there is nothing to switch to
+                // instead of silently disappearing.
+                art.once('ready', function () {
+                    art.controls.add({
+                        name: 'kp-cc',
+                        position: 'right',
+                        index: 31,
+                        html: '<span class="kp-ctl kp-ctl-cc">' + KPIcons.cc + '</span>',
+                        tooltip: 'Subtitles',
+                        click: function () {
+                            if (art.notice) art.notice.show = 'No subtitles for this source';
                         }
                     });
                 });
@@ -2341,7 +2447,7 @@ include_once './includes/header.php';
             if (next >= sourceQueue.length) {
                 if (iframeFallback(consumed)) return;
                 setState('error', {
-                    message: 'All sources failed. Pick another server below or try again.'
+                    message: KP_NO_SOURCE_MSG
                 });
                 return;
             }
@@ -2362,6 +2468,10 @@ include_once './includes/header.php';
          * false when nothing is left — the caller shows the error.
          */
         function iframeFallback(token) {
+            // Custom-player priority: Auto HD never drops to a foreign iframe
+            // on its own. The walk ends on KP_NO_SOURCE_MSG instead and the
+            // viewer picks a server from the chips if they want one.
+            if (autoHdMode) return false;
             for (var i = 0; i < sourceQueue.length; i++) {
                 var e = sourceQueue[i];
                 if (!e || e.mode !== 'embed' || !e.url || !queueEntryPlayable(e)) continue;
@@ -2501,13 +2611,13 @@ include_once './includes/header.php';
         /** Start queue[index]; failures from here fall through to the next entry. */
         function playSourceAt(index) {
             if (!payload || !payload.ok || !sourceQueue.length) {
-                setState('error', { message: 'No playable sources. Try again.' });
+                setState('error', { message: KP_NO_SOURCE_MSG });
                 return;
             }
             if (index < 0 || index >= sourceQueue.length) {
                 if (iframeFallback(playToken)) return;
                 setState('error', {
-                    message: 'All sources failed. Pick another server below or try again.'
+                    message: KP_NO_SOURCE_MSG
                 });
                 return;
             }
@@ -2585,6 +2695,7 @@ include_once './includes/header.php';
             sourceQueue = buildSourceQueue();
             sourceIdx = -1;
             autoHdMode = true;
+            currentAudioLang = null;
             resetResolverRun();
             applyRememberedServer();
             renderServers();
@@ -2613,10 +2724,31 @@ include_once './includes/header.php';
             return !!entry.url;                // direct hls/mp4
         }
 
-        /** Base display name — our own player never shows a provider name. */
+        /**
+         * Display name for a chip / Server row entry.
+         *
+         * Extracted sources are listed under their *provider* name — 8Stream,
+         * VidCore, NHD — so the list actually says which servers are on offer.
+         * (Hiding the direct ones behind a generic "Auto HD" made 8Stream look
+         * missing even while it was the source being played.) "Auto HD" is now
+         * only the fallback for an entry that carries no provider name at all.
+         */
+        const KP_PROVIDER_NAMES = {
+            eightstream: '8Stream',
+            vidcore: 'VidCore',
+            nhdapi: 'NHD',
+            zokoanime: 'NHD',
+            megaplay: 'MegaPlay',
+            anikuro: 'Anikuro',
+            reanime: 'ReAnime'
+        };
+
         function serverBaseLabel(server, isPrimary) {
-            if (isPrimary && isCustomPlayer(server)) return 'Auto HD';
-            return ((server && (server.label || server.key)) || 'HD').replace(/ · /g, ' ');
+            if (!server) return isPrimary ? 'Auto HD' : 'HD';
+            var raw = String(server.label || server.key || '').replace(/ · /g, ' ').trim();
+            var pretty = KP_PROVIDER_NAMES[raw.toLowerCase()] || raw;
+            if (pretty && !/^(primary|hd)$/i.test(pretty)) return pretty;
+            return isPrimary ? 'Auto HD' : 'HD';
         }
 
         function renderServers() {
@@ -2652,9 +2784,9 @@ include_once './includes/header.php';
 
             var wanted = rememberedServer();
 
-            // Duplicate display names (two custom players in one list) get a
-            // numeric suffix — "Auto HD", "Auto HD 2" — so no two chips read
-            // the same. Counted on the base name, before the lang tag.
+            // Duplicate display names (two entries from the same provider) get
+            // a numeric suffix — "NHD", "NHD 2" — so no two chips read the
+            // same. Counted on the base name, before the lang tag.
             var labelSeen = {};
 
             function chipFor(server, isPrimary) {
@@ -2663,8 +2795,9 @@ include_once './includes/header.php';
                 btn.dataset.key = server.key || '';
                 btn.dataset.url = server.url || '';
                 var langTag = (!server.lang || server.lang === 'any') ? '' : ' [' + server.lang.toUpperCase() + ']';
-                // Our own player never shows a provider name — the primary chip
-                // is always "Auto HD"; foreign servers keep their real label.
+                // Extracted sources are listed under their provider name
+                // (8Stream, VidCore, NHD…), which is the whole point of the
+                // row; "Auto HD" only covers an entry with no name at all.
                 var base = serverBaseLabel(server, isPrimary);
                 labelSeen[base] = (labelSeen[base] || 0) + 1;
                 var name = labelSeen[base] > 1 ? base + ' ' + labelSeen[base] : base;
@@ -2679,10 +2812,10 @@ include_once './includes/header.php';
                 return btn;
             }
 
-            // The primary chip is Auto HD: our own player, taken from the
-            // FIRST entry it can actually play. iframe-only servers move to
-            // the collapsed row — unless nothing at all extracts, in which
-            // case the first server stays primary under its real name.
+            // The primary chip is the FIRST entry our own player can actually
+            // take over. iframe-only servers move to the collapsed row —
+            // unless nothing at all extracts, in which case the first server
+            // stays primary under its real name.
             var primary = null;
             for (var pi = 0; pi < filtered.length; pi++) {
                 if (isCustomPlayer(filtered[pi])) { primary = filtered[pi]; break; }
@@ -2758,8 +2891,8 @@ include_once './includes/header.php';
                 return isCustomPlayer(s) &&
                     (!s.lang || s.lang === currentMode || s.lang === 'any');
             });
-            // Auto HD first — the entry the primary chip stands for — then
-            // the other extractable servers, in queue order.
+            // The primary entry first — the one the outside chip stands for —
+            // then the other extractable servers, in queue order.
             var list = [];
             if (currentPrimary && pool.indexOf(currentPrimary) !== -1) list.push(currentPrimary);
             pool.forEach(function (s) { if (s !== currentPrimary) list.push(s); });
@@ -2779,11 +2912,51 @@ include_once './includes/header.php';
                 player.setting.add({
                     name: 'KPSource',
                     html: 'Server',
+                    icon: KPIcons.server,
                     tooltip: items[activeIdx].html,
                     selector: items,
                     onSelect: function (item) {
                         var s = list[Number(item.value)];
-                        if (s) useServer(s);
+                        // fromPlayer: stays inside our own player — see useServer().
+                        if (s) useServer(s, { fromPlayer: true });
+                        return item.html;
+                    }
+                });
+            }
+
+            // অডিও — 8Stream carries each language as its own HLS stream, so
+            // this row re-plays the current source in the picked language
+            // (position preserved) instead of switching an in-manifest track.
+            var curEntry = (sourceIdx >= 0 && sourceQueue[sourceIdx]) ? sourceQueue[sourceIdx] : currentPrimary;
+            var audioList = (curEntry && Array.isArray(curEntry.audio)) ? curEntry.audio : [];
+            if (audioList.length > 1) {
+                // Mark whatever is actually playing: the viewer's own pick
+                // first, else the language the server resolved by default.
+                var wantedAudio = currentAudioLang || (curEntry && curEntry.audio_lang) || null;
+                var audioSeen = {};
+                var audioIdx = 0;
+                var audioItems = audioList.map(function (a, i) {
+                    var label = a.label || ('Audio ' + (i + 1));
+                    audioSeen[label] = (audioSeen[label] || 0) + 1;
+                    var name = audioSeen[label] > 1 ? label + ' ' + audioSeen[label] : label;
+                    var isCur = wantedAudio
+                        ? (a.label === wantedAudio || a.lang === wantedAudio)
+                        : (i === 0);
+                    if (isCur) audioIdx = i;
+                    return { html: name, value: i, default: isCur };
+                });
+                if (!audioItems.some(function (it) { return it.default; })) {
+                    audioItems[0].default = true;
+                    audioIdx = 0;
+                }
+                player.setting.add({
+                    name: 'KPStreamAudio',
+                    html: 'Audio',
+                    icon: KPIcons.audio,
+                    tooltip: audioItems[audioIdx].html,
+                    selector: audioItems,
+                    onSelect: function (item) {
+                        switchStreamAudio(Number(item.value), String(item.html));
                         return item.html;
                     }
                 });
@@ -2795,6 +2968,7 @@ include_once './includes/header.php';
                 player.setting.add({
                     name: 'KPLang',
                     html: 'Language',
+                    icon: KPIcons.subtitle,
                     tooltip: currentMode.toUpperCase(),
                     selector: ['sub', 'dub'].map(function (m) {
                         return { html: m.toUpperCase(), value: m, default: currentMode === m };
@@ -2811,6 +2985,48 @@ include_once './includes/header.php';
                     }
                 });
             }
+        }
+
+        /**
+         * Switch the 8Stream source to another audio language. Each language is
+         * its own stream, so this asks the server for that language's relay URL
+         * and re-plays in place, keeping the playhead.
+         */
+        function switchStreamAudio(idx, label) {
+            var cur = (sourceIdx >= 0 && sourceQueue[sourceIdx]) ? sourceQueue[sourceIdx] : currentPrimary;
+            var a = (cur && Array.isArray(cur.audio)) ? cur.audio[idx] : null;
+            if (!a || !a.imdb || !a.lang) return;
+
+            var pos = playerActive ? currentEpisodePosition() : 0;
+            var subs = (cur && cur.subtitles) || [];
+            var intro = cur ? (cur.intro || null) : null;
+            var outro = cur ? (cur.outro || null) : null;
+
+            setState('loading', { message: 'Switching audio… (' + label + ')' });
+            var q = './includes/get_eightstream_audio.php?imdb=' + encodeURIComponent(a.imdb)
+                  + '&season=' + (parseInt(a.season, 10) || 0)
+                  + '&ep=' + (parseInt(a.ep, 10) || 0)
+                  + '&lang=' + encodeURIComponent(a.lang);
+
+            fetch(q)
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (!data || !data.ok || !data.url) {
+                        if (art && art.notice) art.notice.show = label + ' audio unavailable';
+                        else if (playerActive) setState('playing');
+                        return;
+                    }
+                    currentAudioLang = a.label || a.lang || null;
+                    attemptResume = pos > 10 ? pos : 0;
+                    playToken++;
+                    var token = playToken;
+                    playHls(data.url, subs, intro, outro, attemptResume, token);
+                    attemptResume = 0;
+                })
+                .catch(function () {
+                    if (art && art.notice) art.notice.show = label + ' audio failed';
+                    else if (playerActive) setState('playing');
+                });
         }
 
         /**
@@ -2842,6 +3058,7 @@ include_once './includes/header.php';
             player.setting.add({
                 name: 'KPAudio',
                 html: 'Audio track',
+                icon: KPIcons.audio,
                 tooltip: cur,
                 selector: items,
                 onSelect: function (item) {
@@ -2898,6 +3115,7 @@ include_once './includes/header.php';
             player.setting.add({
                 name: 'KPQuality',
                 html: 'Quality',
+                icon: KPIcons.quality,
                 tooltip: hls.currentLevel === -1 ? 'Auto' : labelOf(hls.currentLevel),
                 selector: items,
                 onSelect: function (item) {
@@ -2934,6 +3152,7 @@ include_once './includes/header.php';
             player.setting.add({
                 name: 'KPSub',
                 html: 'Subtitles',
+                icon: KPIcons.subtitle,
                 tooltip: cur ? cur.html : 'Off',
                 selector: items,
                 onSelect: function (item) {
@@ -2962,7 +3181,9 @@ include_once './includes/header.php';
                 wm.id = 'kp-watermark';
                 wm.setAttribute('aria-hidden', 'true');
                 wm.textContent = <?= json_encode(defined('KP_SITE_NAME') ? KP_SITE_NAME : 'KitsuPlay', JSON_UNESCAPED_UNICODE) ?>;
-                wm.style.display = 'none';
+                // Starts visible: setState() only ever hides it for the gate
+                // and the error card, so a slow startup cannot leave the player
+                // running without it.
                 host.appendChild(wm);
             } catch (e) {}
         }
@@ -3001,17 +3222,29 @@ include_once './includes/header.php';
             langEl.appendChild(dubBtn);
         }
 
-        // A chip click is an explicit pick: it starts a fresh attempt at that
-        // queue entry (the queue, not a parallel path, so a failure here keeps
-        // falling through to the entries after it).
-        function useServer(server) {
+        // A chip click starts a fresh attempt at that queue entry (the queue,
+        // not a parallel path, so a failure here keeps falling through to the
+        // entries after it).
+        //
+        // `opts.fromPlayer` marks a pick made from the in-player Server menu.
+        // Those keep the custom-player promise (see autoHdMode): the viewer
+        // asked for a *server*, not for a different kind of player, so a
+        // failed extraction walks on instead of dropping ArtPlayer for that
+        // server's iframe. Only the chips row outside the player — where the
+        // click is unmistakably "open this embed" — may end on an iframe.
+        function useServer(server, opts) {
             if (!server) return;
-            // Picking the Auto HD entry keeps the auto walk (extract → our
-            // player, iframe only as last resort); any other chip or menu
-            // entry is an explicit server choice and degrades to that
-            // server's own iframe when extraction fails.
-            autoHdMode = (!currentPrimary || server === currentPrimary);
-            // An explicit pick is what gets remembered for this title.
+            var fromPlayer = !!(opts && opts.fromPlayer);
+            // An in-player pick of one specific server is a deliberate ask:
+            // reopen that entry's attempt budget so it is really extracted
+            // again here instead of being carried past as "already tried"
+            // (which is what used to hand the screen to its iframe).
+            if (fromPlayer && server.mode === 'embed' && server.url) {
+                delete resolverTried[server.url];
+                resolverSpent = 0;
+            }
+            autoHdMode = fromPlayer || !currentPrimary || server === currentPrimary;
+            // The pick is what gets remembered for this title.
             rememberServer(server.key);
 
             if (!payload || !payload.ok) return;
@@ -3186,7 +3419,7 @@ include_once './includes/header.php';
                                 return;
                             }
                             if (chipsEl) chipsEl.innerHTML = '';
-                            setState('error', { message: 'No source found for this movie.' });
+                            setState('error', { message: KP_NO_SOURCE_MSG });
                             return;
                         }
                         commitPayload(autoplay);
@@ -3219,7 +3452,7 @@ include_once './includes/header.php';
                                 return;
                             }
                             if (chipsEl) chipsEl.innerHTML = '';
-                            setState('error', { message: 'No source found for this episode.' });
+                            setState('error', { message: KP_NO_SOURCE_MSG });
                             return;
                         }
                         commitPayload(autoplay);
@@ -3248,7 +3481,7 @@ include_once './includes/header.php';
                     if (!data || !data.ok) {
                         if (chipsEl) chipsEl.innerHTML = '';
                         setState('error', {
-                            message: (data && data.message) || 'No sources found for this episode.'
+                            message: KP_NO_SOURCE_MSG
                         });
                         return;
                     }
@@ -4115,6 +4348,7 @@ include_once './includes/header.php';
                 wmHost.appendChild(wm);
             }
         } catch (e) {}
+        if (window.kpWatchHints) window.kpWatchHints(art);
 
         let legacyLastTime = 0;
         let legacyLastSentPos = -1;
