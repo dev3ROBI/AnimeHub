@@ -1,7 +1,7 @@
 # AnimeHub — Handoff
 
 > Purpose: any future session (or dev) can pick up exactly where work stopped.
-> Last updated: 2026-09-26 (browse-page design pass, mobile settings panel, Top-10 cover gap, Chinese captions + Chinese-platform extractor scaffold, dubbed-audio defaults + aggregator slot).
+> Last updated: 2026-09-27 (in-player rework: Language row removed, sub/dub cuts in the Server menu, chips row = single More-servers toggle, subtitle/quality picker colours; earlier: ToonStream mirror rotation + transient-cache classification, FlixHQ flakiness fix, subtitle proxy host extension + dead-VTT probe, server-card orphan guard, in-player Server/Language UX verification; earlier: ToonStream multi-language / multi-server upgrade + Hindi-dub scraper, ArtPlayer bar/setting redesign, browse-page design pass, mobile settings panel, Top-10 cover gap, Chinese captions + Chinese-platform extractor scaffold, dubbed-audio defaults + aggregator slot).
 
 ## 1. Project snapshot
 
@@ -10,6 +10,129 @@
 - **Repo:** `https://github.com/dev3ROBI/AnimeHub.git`, branch `main`.
 
 ## 2. Completed work
+
+### Follow-up: in-player rework — no Language row, sub/dub server cuts, single More-servers toggle, picker colours (IMPLEMENTED, 2026-09-27)
+
+**Asked (4 UI changes):** (1) remove the Language section from the ⚙ panel, (2) in the Server menu use MegaPlay's and other servers' sub **and** dub variants *that play in our custom player*, leaving the non-playable ones under More servers, (3) in the chips row drop the first boxed item (Server label + primary chip) and keep only the More servers button, (4) subtitle picker rows white by default with only the selected row coloured — same for the quality picker.
+
+**1. Language row gone — `watch.php`:** the `KPLang` block inside `addPlayerSettings()` is deleted (plus the now-unused `KPIcons.subtitle`). Language follows the **server pick** instead: every cut is its own tagged row in the Server menu and in the chips, so one control rather than two that can disagree. `currentMode`/`currentLang` are untouched — `resolve()` still sends them, and `renderLangToggle()` still hides `#lang-toggle` in custom mode / for TMDB and shows it for iframes (its comment no longer points at the deleted row).
+
+**2. Sub/dub cuts for resolver-playable embeds — `includes/stream.php`:**
+- New `stream_embed_host_is_custom($url)` (host ∈ `RESOLVER_ALLOWLIST`) and `stream_provider_cuts(...)`: a lang-capable provider **our own resolver can take over** is emitted for both cuts, **requested one first** (PHP 8's sort is stable, so the automatic first pick still lands on the language asked for); an iframe-only provider gets the requested cut alone — a second row would only reopen the same iframe.
+- `stream_embed_servers()` keys lang-capable providers **per cut** (`megaplay-sub`/`megaplay-dub`, `anixo-sub`…). Non-negotiable: two rows of one provider must differ by key or the active highlight, `rememberServer()` and the Server menu's ✓ all resolve to the wrong entry.
+- `stream_nhd_anime_server()`: dub key `nhd-anime-dub` (was `nhd-anime`), sub `lang` `any` → `sub`, so the rows read `Auto HD [SUB]` beside `Auto HD [DUB]`.
+- Effect (Frieren `anilist:154587`): ToonStream×2 + `MegaPlay [SUB]` + `MegaPlay [DUB]` + `Auto HD [SUB]` + `Auto HD [DUB]` + AniXo/VidPlus/AniLink (one cut each, iframe-only, so they stay outside the Server menu). Keys and URLs unique, primary = requested cut, health filter unaffected (both cuts are `primary` → skipped by `stream_filter_active_embeds`).
+
+**3. Chips row = one toggle — `watch.php` `renderServers()`:** `[সার্ভার][primary][▾ More]` → `[▾ More servers (N)]` holding **every** server, the active one highlighted inside. The auto-open block is gone (the info line above already names the playing server); `filtered.length === 1` renders that one chip with no label. Chip and Server-menu names now dedupe on `base + langTag`, so `MegaPlay [SUB]` / `MegaPlay [DUB]` stop collapsing into `MegaPlay 2 [DUB]`.
+
+**4. Picker colours — `assets/css/watch_page_style.css`:** root cause was `#artplayer .art-controls .art-control.on { color:#ff2e63 }` — ArtPlayer puts `.art-selector-list` **inside** the control, so every row inherited the pink and `.art-current` was indistinguishable (the settings panel was already correct: white rows, pink `art-current`). Added `#artplayer .art-selector-list .art-selector-item { color:#fff }` and `… .art-selector-item.art-current { color:#ff2e63 }`; the ID selector outranks both the inherited `.on` and ArtPlayer's own `var(--art-theme)` rule.
+
+**Verification (all green):** `php -l` watch/stream · inline 3/3 · `test_client_fns.js` 15/15 · harness **41/41** · `test_ts_fix.php` 20/20 · `test_flixhq.php` ALL OK · `matrix2.php` **8/11** (unchanged baseline: Beyblade/Pokemon/One Piece ep1 site-side) · `minify.php --check` up to date · endpoint trio via `curl.exe -b` = movie `FlixHQ Vidmoly[any]`, tv `8Stream[any] | FlixHQ Vidmoly[any] | …`, anime ToonStream.
+- `check_real.js` Naruto `anilist:20&ep=1`: 10 chips, embed⇄custom switching both ways, `exceptions:[]`, `consoleErrors:[]`; movie `tmdb:movie:157`: 10 chips, same, clean.
+- **`check_ui2.js`** (new, `$env:TEMP\opencode\`): chips row children = exactly `kp-chip-more-btn("More servers 10")` + `kp-chip-more`, `serverChipsOutsideWrap:0`, no `.kp-chip-label`, `aria-expanded:"false"` (never force-opened); ⚙ rows = Play Speed / Aspect Ratio / Video Flip / Subtitle Style / Server — **`hasLanguageRow:false`**; Server sub-panel = ToonStream Turbo/Ruby/Moly [Multi Audio] + **MegaPlay [SUB]/[DUB] + Auto HD [SUB]/[DUB]**, playing one `art-current`, AniXo/VidPlus/AniLink absent; clicking `MegaPlay [DUB]` from the chips plays it (`MegaPlay · DUB · 480P`); with `kpSubLabel` carrying `.on` the subtitle picker reads **Off = `rgb(255,255,255)`, English (`art-current`) = `rgb(255,46,99)`**; quality picker Auto = pink, rest white; `errors:[]`.
+
+**Notes / gotchas:** CDP probes flake on the *first* run with `no live session` (session-file read race — just re-run) · `Invoke-WebRequest -Headers @{Cookie=…}` silently drops the cookie on this box, use `curl.exe -b "PHPSESSID=…"` for the endpoint trio · `run_harness.js` needs Chrome up manually (`check_real.js`/`check_ux.js`/`check_ui2.js` auto-relaunch).
+
+### Follow-up: ToonStream mirror rotation + FlixHQ stability + in-player UX verification (IMPLEMENTED, 2026-09-27)
+
+**Asked:** (1) fix anime titles where ToonStream returns nothing / wrong title (example: Naruto), (2) add FlixHQ servers for Movies & TV, (3) a working custom player where users easily switch video language, sub/dub, and server. All three verified end-to-end.
+
+**URL format (root cause of "empty movie page"):** correct ids are `watch.php?id=tmdb:movie:157`, `id=tmdb:tv:1396&ep=3`, `id=anilist:20&ep=1`. `catalog_parse_id` expects `tmdb:{remote}` — a bare `movie:157` parses as provider `legacy` → DB miss → `kp-empty` (watch.php line 137).
+
+**FlixHQ hardening — `includes/flixhq_api.php`:**
+- `fh_http()` now owns curl, returns `[code, body]`, one immediate retry on network failure (code 0). All call sites updated (`flixhq_page/search/players/subtitles/extract`).
+- Classification: only **404/410 (or 200 < 500 bytes)** are negative-cached; **429/403/5xx/code-0 are transient, never cached**; a positive hit requires `data-token` present (big token-less pages pass through uncached). Fixed the observed "alternates between full and empty results" flakiness — 3/3 consistent runs since. Typo fix `$hit['html'` → `$hit['html']`.
+
+**ToonStream mirror rotation — `config/config.php` + `includes/toonstream_api.php`:**
+- Landscape: only **`https://toonstream.us` serves the real site** (`.vip`/`.dad` 301→.us; `.day` dead; `.in` parked; `.shop` = different site gen `watch/{slug}-episode-{N}/` — incompatible, dropped). Config base list = `[toonstream.us, toonstream.vip, toonstream.dad]`.
+- `toonstream_is_miss()`: 404, or 500 whose body contains `404 Not Found -` / `<title>404` (ToonStream's missing paths = HTTP 500 + 48KB error page). `toonstream_page()` rewritten: 200+>500 bytes = hit; real miss → negative-cache + try next mirror; transient → next mirror **uncached**. **125 poisoned cache rows deleted** (`DELETE FROM api_cache WHERE provider='toonstream'`) — this was why Naruto and many other titles resolved empty.
+- `toonstream_episode_page()` **server-card validation**: candidate pages must contain server cards (`$accept` closure; movies taken as-is), otherwise remember `$serverless` and keep looking, using it only as last resort. Defeats stale constructed-path orphans (e.g. One Piece `2x62`) that used to shadow real listings.
+- Site structure facts: series pages render season 1 only (naruto 1x1–1x52), other seasons `/series/{slug}/season/{N}` with continuous numbering; language-cut pages link the plain slug; One Piece site list = `1x6..1x61` only; **`/episode/one-piece-1x1/` etc. are now hard 404s upstream** (site pruned them — matrix2 One Piece `ok=0` is site-side, not ours).
+
+**Subtitle proxy / CORS — `includes/subtitles_api.php` + callers:**
+- `subtitles_host_ok()` extended with `streamruby.net` (+subdomains) and `qqqcdn.cloud` (+subdomains). Signers: `subtitles_api.php:254`, `cn_extract_api.php:330`, `flixhq_api.php:409`, `toonstream_api.php:1082`.
+- `subtitle_sign` wired into `toonstream_resolve` (key-indexed loops — **`foreach ((array)$expr as &$sub)` loses writes**, the initial wiring was silently a no-op) and `flixhq_source_entries` (sign after `flixhq_subtitles`).
+- **Known PHP gotcha:** foreach-by-ref over an expression — use key-indexed loops when the array must persist.
+- `toonstream_sub_alive()` probes each rubystm VTT at emission and drops dead tracks (fresh streamruby VTT links 404 upstream immediately; qqqcdn VTTs verified 200 + valid WEBVTT).
+- Verified: proxy fetch of signed qqqcdn URL = 200 WEBVTT; movie/TV/anime browser probes show `exceptions:[]`, `consoleErrors:[]` (the old "Failed to fetch" CORS errors gone).
+
+**Browser verification (check_real.js, auto-relaunching debug Chrome):**
+- Movie `tmdb:movie:157`: 10 chips, `FlixHQ Vidmoly [English]` primary, embed⇄custom switching, blob playback, payload `subs=3`, clean.
+- TV `tmdb:tv:1396&ep=3`: 11 chips, `8Stream [English]` primary + FlixHQ second, `Ep 3 / 62`, clean.
+- Naruto `anilist:20&ep=1`: 8 chips, `ToonStream Turbo/Ruby/Moly [Multi Audio]` primary, embed⇄custom switching, clean.
+- `check_real.js` hardening: payloadProbe strips `tmdb:` prefix (was `payloadProbe.ok:false`), `ensureChrome()` relaunches Chrome (it dies between runs), `cdp_kill.ps1` helper.
+
+**In-player UX (check_ux.js) — VERIFIED:** `addPlayerSettings()` (watch.php:2936) runs only inside `art.once('ready')` (watch.php:2067) — probes must wait out `art-loading-show`. Panel rows: Play Speed, Aspect Ratio, Video Flip, Subtitle Style, **Audio track हिन्दी**, **Server: ToonStream Ruby [Multi Audio]**; bottom bar carries `kpSubLabel` (subtitle) + `kpQuality` selectors. `langHidden:true` in custom mode is **by design** (watch.php:3529-3536 — chips already tag each server); TMDB hidden at 3527. **The Language row was removed by the 2026-09-27 in-player rework above** — language now follows the server pick.
+
+**Verification (all green):** `php -l` on watch/toonstream/flixhq/subtitles/stream/config/get_*/http/subtitle_proxy · inline 3/3 · `test_client_fns.js` 15/15 · harness **41/41** · `test_ts_fix.php` **20/20** · `test_flixhq.php` ALL OK · `matrix2.php` **8/11** (Beyblade/Pokemon known site-side embed gaps + One Piece ep1 pruned upstream — verified hard 404s) · `minify.php --check` up to date · endpoint trio: movie=FlixHQ Vidmoly, tv=8Stream+FlixHQ, anime=ToonStream Turbo/Ruby/Moly.
+
+**Notes / gaps:** FlixHQ subs count varies per extraction (3 vs 9 — non-blocking, English always present) · 8Stream subtitle host never captured (raw URLs, no console errors) · debug CDP Chrome `--remote-debugging-port=9223 --user-data-dir=%TEMP%\opencode\cdp-profile` dies between runs — `check_real.js`/`check_ux.js` auto-relaunch, `run_harness.js` needs Chrome manually up · temp probes live in `$env:TEMP\opencode\` (not in repo).
+
+### Follow-up: ToonStream multi-language / multi-server upgrade (IMPLEMENTED)
+
+**Asked:** (1) hide the SUB/DUB toggle while the **custom player** runs (keep it for external embeds), (2) "More servers" must list every server with its sub/dub/language tag, (3) a new info line above the chips shows the playing server + video language + other info, (4) ToonStream must extract **both cuts** (sub/dub/Hindi/Tamil/Telugu) and **more servers** (rubystm "Ruby" + others), each tagged with its language.
+
+**Server — `includes/toonstream_api.php` (rewritten):**
+- `toonstream_resolve()` resolves **both toggle cuts in one pass** (requested first, deduped by host+variant+path), merges episode-page cards per-variant, ranks a bounded **sweep** across embeds. Servers: `key=toonstream-{host}-{variant}-{idx}`, `label='ToonStream {CardName}'` (card name from the options-block `<span class="server">`, iframe fallback), plus `lang` (`sub|dub|any`), `audio_lang`, `subtitles`.
+- **Lang model:** `toonstream_entry_lang(slug,title)` — tamil/telugu/malayalam/kannada markers → `dub`+name; `hindi|muse-india|sony yay` → `dub`+Hindi; generic `\bdub\b` → `dub`; `\bsub\b` → `sub`; default `any`. Unmarked + episode page contains `Multi Audio` → `audio_lang='Multi Audio'` (client shows `[Multi Audio]`). Use `~` delimiter for PCRE — **`#` inside a `[…]` class still terminates a `#`-delimited pattern** (caused a real bug), and card structure is `<a href="#options-N">` so those patterns need `~` too.
+- **rubystm ("Ruby"):** POST `https://rubystm.com/dl` body `op=embed&file_code={id minus trailing '-segment'}&auto=1&referer=` + Origin/Referer headers, **fresh cookie jar** (stateless) → packer blob → **PHP packer unpacker** `toonstream_packer_unpack()` (brace-scan the `function(p,a,c,k,e,d)` wrapper, replay decode loop with `\btoken\b`+`preg_replace_callback`, base-A via digit string `0-9a-zA-Z`, dollar-safe) → `file:"(https…m3u8)"` + `.vtt` tracks (skip `kind:"thumbnails"` → `subtitles[{url,language,format:'vtt'}]`).
+- **Sweep tuning (live-measured):** budget `TOONSTREAM_BUDGET=12`s, `TOONSTREAM_MAX_SERVERS=5`, `TOONSTREAM_MAX_EMBEDS=7`, per-card timeout `min(4,left)`, per-variant share `ceil(maxSrv/variants)`, diminishing-returns miss limits, stable `usort` by (variant, hostRank, pageOrder). Rank: emturbovid 0, blakite 1, rubystm 2, vidmoly 3, as-cdn 5, generic 6, filesforever 90, abyss 91, youtube 92 (≥90 skipped — no extractor).
+- **Lang filtering removed server-side:** `get_stream.php?lang=sub` truthfully returns `[dub]` servers too — they must stay visible/playable (the old `lang=any` lie existed only to dodge the client filter, now deleted).
+
+**Server — `includes/stream.php` / `config/config.php`:** `stream_try_toonstream()` forwards `audio_lang`; `stream_build_sources()` step 2 forwards per-server `subtitles` (shape `{url, language, format}` — line 2132 renders `s.language`). TOONSTREAM knobs as above.
+
+**Client — `watch.php`:**
+- **`renderLangToggle()`** hides `#lang-toggle` when `payload && payload.ok && payload.mode !== 'embed'` (custom player) and for TMDB; re-shown when `payload = null` (resolve start) or embed. Called from `commitPayload()` and `resolve()`. (The in-player ⚙ **Language row** that used to be the mode switch was **removed 2026-09-27** — see the in-player rework section at the top.)
+- **Chips/menus unfiltered:** `renderServers()` no longer filters by `currentMode`; shared **`langTagText(s)`** appends `[DUB · Hindi]` / `[Multi Audio]` / `[SUB]` to every chip and in-player Server-menu row; `queueEntryPlayable()` → always `true`; settings pool filter → `isCustomPlayer(s)` only.
+- **`#kp-play-info` info line** (first row of `.anikuro-controls`, hidden by default, `#kp-play-info` + `.kp-info-pill`/`.kp-info-dot` CSS after the `#lang-toggle` rule): server (fa-server) · language (fa-language) · quality via `kpActiveQualityLabel(art.hlsInstance)` (fa-tv, refreshed on `LEVEL_SWITCHED` + quality `onSelect`) · `Ep X / Y`. `renderPlayInfo()` is called from `markActiveChip`, `renderServers`, `commitPayload` and wrapped in an **outer try/catch** (quality `onSelect` depends on it not throwing to return its label). `buildSourceQueue`/`push`/graft carry `audio_lang`.
+- `updateGate` `gateSource` prettified through `KP_PROVIDER_NAMES`.
+
+**Verification (all green):** `php -l` on watch/toonstream_api/stream/config/get_stream · inline script check 3/3 · `test_client_fns.js` 15/15 · ArtPlayer harness **41/41** (grew from 39 — `renderPlayInfo` added to the extraction list; without it the harness ReferenceErrors inside quality `onSelect` and the "back to Auto" test fails) · matrix2 9/11 (Beyblade/Pokemon known site-side) · `get_stream.php?id=anilist:269&ep=1&lang=dub|sub` both cuts, 3-5 tagged servers · **CDP page probe** (`check_page.js`): gate bar shows `ToonStream Ruby [DUB · Hindi]` etc + `More servers 2`, `langHidden:true`, info line `…· 1080P· Ep …` (live quality), ⚙ rows/subtitle/quality/watermark intact, `exceptions:[]`, `consoleErrors:[]`.
+
+**Notes / gaps:** cold first resolve ~6-15s (two cuts + ranked sweep; budget-bounded, spinner shows), warm ~4-9s · filesforever/abyssplayer still unextracted (Beyblade-class pages fail → embed tail) · debug CDP Chrome for checks: `chrome.exe --remote-debugging-port=9223 --user-data-dir=%TEMP%\opencode\cdp-profile` (closing its last tab kills the instance — relaunch as needed) · harness/probe/test scripts live in `$env:TEMP\opencode\` (not in repo).
+
+### Follow-up: ToonStream scraper — Hindi / Indian dubs for anime (IMPLEMENTED)
+
+**Asked:** add a ToonStream scraper so anime gets Hindi and other dubbed streams. Scope agreed: **playback sources only** (no catalog import) and Hindi rides the **existing sub/dub toggle** (dub side) — no third mode, no client changes beyond a provider name.
+
+**Files:** new `includes/toonstream_api.php` · `config/config.php` → `TOONSTREAM_ENABLED/TIMEOUT/PAGE_TTL/SEARCH_TTL/MAX_EMBEDS` + `$GLOBALS['TOONSTREAM_BASE_URLS']` (mirrors `.dad/.day/.in/.shop`) · `includes/stream.php` → include + **step 1.65** (after CN extractor, before embed iframes) + `stream_try_toonstream()` · `watch.php` → `KP_PROVIDER_NAMES.toonstream = 'ToonStream'`.
+
+**Site facts (all live-verified 2026-09-26):** Next.js app. JSON search `GET /search/all?q=` → `{count,data:[{title,type,url}]}` — **intermittently 301s (bot defence), retry once per base**; a valid JSON body (even empty) ends the mirror loop. Entries: `/series/{slug}`, `/movies/{slug}`; episodes `/episode/{slug}-{S}x{E}/`; a "Season N" catalogue title needs a **bare-title re-query** (site keeps one entry per show). Episode pages list server iframes. A constructed episode path that 404s falls back to scanning the series page for `-{S}x{E}/` links (works — Naruto Shippuden/Death Note/AoT resolve this way; One Piece starts at 1x6 so ep1 correctly misses).
+
+**Extraction chains (in `toonstream_extract_embed`, first hit wins):**
+1. **emturbovid** — `<div id="video_player" data-hash="…m3u8">`; direct m3u8, CORS `*`, no referer. Rank 0.
+2. **blakite** — iframe `/embed/{tmdbId}/{S}-{E}` → `GET blakiteapi.xyz/api/get.php?id={S}-{E}&tmdbId={tmdb}` (movies: `?tmdbId=`) → JSON `{dataId, quality, format, ranges}` → player.js scheme: MP4 `https://hugh.cdn.rumble.cloud/video/{dataId}.{code}.mp4` (code map 240p→oaa … 1080p→haa; **only the listed quality is guaranteed, others 404 — probe with ranged GET**), M3U8 `{dataId}.{code}.tar?r_file=chunklist.m3u8&r_type=application/vnd.apple.mpegurl&r_range={range-from-ranges-table}`. Verified 206 `video/mp4`, `ftyp` bytes. Rank 1.
+3. **generic** `.m3u8`/`.mp4` regex (`\/` unescaped first), plus **one JS-redirect hop** (`window.location.replace`, vidstreaming.xyz style). as-cdn/vidmoly pass through the generic hop when they serve one.
+
+**Stop at the FIRST success** (stream_build_sources appends the embed tail for redundancy — scraping a second host cost 6-10s of as-cdn timeouts on the critical path), ≤4 embeds, ~12s deadline. Warm resolves: **0.5-1.4s**.
+
+**Pick scoring:** exact slug 100 / prefix 85 / word-overlap ≥0.6, **+5 series** (search mixes movie rows in), **movies only eligible exact** (a `naruto-` prefix swallowing `naruto-shippuden-the-movie-…` stole a series lookup), **−20 for an unrequested `-season-N`** slug; +25 dub-variant in dub mode / +15 plain in sub; **miss below 60** (never stream a wrong title — 'Boruto' must not answer for 'Naruto'). Type comes from the **URL shape**, not the JSON `type` field (proven unreliable).
+
+**Language mapping — client-side constraint (RESOLVED by the multi-server upgrade above):** `watch.php` used to filter servers with `s.lang === currentMode || s.lang === 'any'`, so `$label = ($pick['dub'] && $lang === 'dub') ? 'dub' : 'any'` was required. That filter is **now deleted** — chips show every server with a lang tag, and `lang` carries the truthful `sub|dub|any` value. The historical `any`-lie notes below remain valid for cached payloads but are no longer load-bearing. Plain cuts → `any`; a dub-variant picked **under sub mode** (means no plain cut exists) → `any`, else the sub filter would hide the only server (this exact bug was caught in testing: Naruto Shippuden sub returned `lang=dub`).
+
+**Placement:** step 1.65 — after AniList/8Stream/CN, before embed iframes. Consequence (intentional): in **sub** mode 8Stream's embed payload still outranks a ToonStream direct stream; in **dub** mode (the target use case) ToonStream wins wherever 8Stream has no dub (live e2e: `get_stream.php?id=anilist:269&ep=1&lang=dub` → `mode:hls`, turboviplay m3u8, `provider:toonstream`, `lang:dub`).
+
+**Verified matrix:** 9/11 titles resolve (One Punch Man dub+sub, JJK, Demon Slayer, MHA, Naruto Shippuden, Death Note, AoT + Bleach over HTTP) · `php -l` clean on all 4 files · inline script check 3/3 · misses are content reality: Pokemon/Doraemon/Shinchan/DBZ **series do not exist on the site** (search returns only their movies or nothing — do not "fix" the scorer for these), One Piece ep1 absent.
+
+**Known gaps (future work):**
+- **Beyblade-class pages** (only filesforever + abyssplayer + vidstreaming, no emturbovid/blakite) still fail → player falls back to the embed tail. filesforever: `/assets/piliyerxnew.js` is obfuscated (response = `atob` JSON with `fileId`, CDN `ddn.iqsmartgames.com/file/`); abyssplayer: base64 `datas` config consumed by `iamcdn.net/player-v2/lite.bundle.js`. Either needs deobfuscation or a JS run.
+- as-cdn is flaky (timeouts/523) — already ranked below the two working hosts.
+- blakite's `get.php` accepts **any** `tmdbId`+`SxE` independent of ToonStream — a tempting standalone Hindi source (would need a tmdb-id path in the chain), deliberately not built (out of scope).
+
+### Follow-up: ArtPlayer bar + settings redesign (IMPLEMENTED)
+
+**Asked:** reshape the player per user screenshots — bar controls `English` / `Off` text buttons + the quality `720P` sitting **before** ⚙, and a nested **"Subtitle Style"** submenu under ⚙.
+
+**Code:** `watch.php` only (ArtOpts ~1935, subtitle options block ~2087, settings builders ~3040-3440). `initLegacyPlayer` untouched.
+
+**Validator facts learned from the ArtPlayer v5 dist (do not regress):**
+- Scheme `click: '?function'` → type `function|undefined`. **`click: null` FAILS option validation** ("[Type Error] … but got 'null'"); to *clear* a stale handler use `click: undefined` (Object.assign keeps undefined keys, handler removed).
+- Range: `onChange` → `input` event, `onRange` → `change`; the tooltip assignment lands **after an `await`** — tests must `await a microtask` before reading `item.tooltip`.
+- Control selector click: sync `check()` writes `.art-selector-value` = item.html, then async `innerHTML = await onSelect(...)` in a microtask.
+- Unknown object keys are not validated (scheme keys only); built-in rows: `Play Speed`, `Aspect Ratio`, `Video Flip`; control indexes: sub 12, quality 14, setting 30. Subtitle CSS vars: `--art-subtitle-font-size: 20px`, `--art-subtitle-bottom: 15px`.
+- HLS subtitle label simplified to `t.name || t.label || t.language || ('Subtitle ' + (n+1))` (the `(eng)` suffix looked wrong next to the clean server labels).
+
+**Verification:** `tools/build_harness.js` (temp) extracts the real functions from `watch.php` into `harness.html` → headless Chrome → **39/39 PASS** (row order, submenu, color/bg/size/position/offset + reset, quality list + LEVEL_SWITCHED label, sub labels, plain→selector merge clearing stale click, single-level removal) · `php -l watch.php` · inline script check 3/3.
 
 ### Follow-up: dub-first audio, id-aware embed templates, aggregator slot (IMPLEMENTED)
 
@@ -405,10 +528,15 @@ countdown.js ticks → at 0 fires kp:released → row unlocks + toast
 
 ```
 php -l watch.php && php -l index.php && php -l includes/anilist_api.php && php -l includes/functions.php
+php -l includes/stream.php && php -l includes/toonstream_api.php && php -l config/config.php
 php tools/minify.php && php tools/minify.php --check
 node --check assets/js/countdown.js && node --check assets/js/countdown.min.js
 ```
-Live checks: `watch.php?id=anilist:21` (chip in Next EP; locked rows if total known) · a NOT_YET title → all rows locked with arrival · homepage Upcoming shows `.kp-side-air`.
+Live checks: `watch.php?id=anilist:21` (chip in Next EP; locked rows if total known) · a NOT_YET title → all rows locked with arrival · homepage Upcoming shows `.kp-side-air`. · `includes/get_stream.php?id=anilist:269&ep=1&lang=dub` → `provider:toonstream` HLS **and ≥2 tagged servers (Hindi/Multi Audio/SUB)** · same request `lang=sub` → still returns truthful `dub` servers (no lang filter).
+
+Player-regression harness (scripts live in `$env:TEMP\opencode\`, not the repo):
+- `node check_inline.js watch.php` → 3/3 OK · `node test_client_fns.js` → 15/15 · `node build_harness.js && node run_harness.js` → **41/41** (needs debug CDP Chrome on :9223 — it dies between runs, relaunch) · `php matrix2.php` → **8/11** (Beyblade/Pokemon known site-side embed gaps + One Piece ep1 pruned upstream = hard 404s).
+- `php test_ts_fix.php` → 20/20 (ToonStream mirrors/orphans; must be run after any toonstream_api change) · `php test_flixhq.php` → ALL OK · `node check_real.js <url>` → 3 pages (movie `tmdb:movie:157` / TV `tmdb:tv:1396&ep=3` / anime `anilist:20&ep=1`) with `payloadProbe.ok` + `exceptions:[]` + `consoleErrors:[]` (auto-relaunches Chrome) · `node check_ux.js <url>` → settings panel shows the **Server** row and **no Language row** (probe must wait out `art-loading-show` — rows add on `art.once('ready')`) · `node check_ui2.js <url>` → chips row = one `kp-chip-more-btn` + `kp-chip-more`, Server sub-panel carries both cuts, subtitle/quality picker rows white with a pink `.art-current`.
 
 ## 7. UI/UX roadmap (NOT yet implemented — page-by-page plan)
 
@@ -423,3 +551,4 @@ Already present — don't rebuild: hero autoplay, continue-watching, `kpToast`, 
 1. P0 items one at a time (minify + lint + curl after each).
 2. Optional later: local `episodes.release_date` + admin cron (original SQL proposal) only if scheduled local uploads become a thing.
 3. Consider `date.timezone = Asia/Dhaka` — Next EP / sidebar `date()` renders in server tz (pre-existing).
+4. ToonStream gaps (see §2): filesforever (`piliyerxnew.js` obfuscated) + abyssplayer (iamcdn bundle) extraction to cover Beyblade-class pages; optional standalone blakite source (works from `tmdbId`+`SxE` alone).

@@ -9,6 +9,7 @@ include_once __DIR__ . '/tmdb_movie_api.php';
 include_once __DIR__ . '/embed_tv.php';
 include_once __DIR__ . '/eightstream_api.php';
 include_once __DIR__ . '/cn_extract_api.php';
+include_once __DIR__ . '/flixhq_api.php';
 include_once __DIR__ . '/subtitles_api.php';
 
 header('Content-Type: application/json');
@@ -76,6 +77,23 @@ if (function_exists('cnx_enabled') && cnx_enabled()) {
 $sources = [];
 if ($eight) $sources[] = $eight;
 if ($cn && !empty($cn['url'])) $sources[] = $cn;
+
+/*
+ * FlixHQ third (same as the movie endpoint): direct HLS for the requested
+ * season/episode with the site's caption tracks — real chips for the
+ * custom player, tagged [English].
+ */
+$flix = [];
+if (flixhq_enabled()) {
+    $flixTitle = (string)($detail['title'] ?? $detail['name'] ?? '');
+    $flixYear  = (int)($detail['year'] ?? 0);
+    if ($flixYear <= 0 && !empty($detail['first_air_date'])) {
+        $flixYear = (int)substr((string)$detail['first_air_date'], 0, 4);
+    }
+    $flix = flixhq_source_entries($flixTitle, $flixYear, 'tv', $season, $episode);
+}
+foreach ($flix as $fe) $sources[] = $fe;
+
 foreach ($allServers as $srv) {
     if (empty($srv['url'])) continue;
     $sources[] = [
@@ -96,7 +114,9 @@ foreach ($allServers as $srv) {
 }
 
 // Whichever custom source took the top slot is what the player starts on.
-$primary = ($eight && !empty($eight['url'])) ? $eight : (($cn && !empty($cn['url'])) ? $cn : null);
+$primary = ($eight && !empty($eight['url'])) ? $eight
+         : (($cn && !empty($cn['url'])) ? $cn
+         : (!empty($flix[0]['url']) ? $flix[0] : null));
 
 $response = [
     'ok'         => true,

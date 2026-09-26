@@ -304,12 +304,19 @@ function subtitles_attach(&$payload, $imdb, $season = 0, $episode = 0) {
 function subtitles_host_ok($host) {
     $host = strtolower(trim((string)$host));
     if ($host === '' || !preg_match('/^[a-z0-9.-]+$/', $host)) return false;
-    // subs5.strem.io, subs7.strem.io, … — the whole family.
+    // subs5.strem.io, subs7.strem.io, . - the whole family.
     if ($host === 'strem.io' || substr($host, -9) === '.strem.io') return true;
     // Bilibili's CC CDN (aisubtitle.hdslb.com), for the platform captions a
     // Chinese extractor hands us. It only answers with a bilibili Referer,
     // which subtitles_referer_for() supplies below.
-    return ($host === 'hdslb.com' || substr($host, -10) === '.hdslb.com');
+    if ($host === 'hdslb.com' || substr($host, -10) === '.hdslb.com') return true;
+    // ToonStream's embed caption CDNs (rotating subdomains such as
+    // ucxipzwkyhms02.streamruby.net) - no ACAO header, so the browser can
+    // only read them same-origin through this proxy.
+    if ($host === 'streamruby.net' || str_ends_with($host, '.streamruby.net')) return true;
+    // FlixHQ's caption CDN (qqqcdn.cloud).
+    if ($host === 'qqqcdn.cloud' || str_ends_with($host, '.qqqcdn.cloud')) return true;
+    return false;
 }
 
 /**

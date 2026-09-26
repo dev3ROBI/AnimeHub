@@ -20,6 +20,7 @@ include_once __DIR__ . '/catalog.php';
 include_once __DIR__ . '/reanime_api.php';
 include_once __DIR__ . '/eightstream_api.php';
 include_once __DIR__ . '/cn_extract_api.php';
+include_once __DIR__ . '/toonstream_api.php';
 include_once __DIR__ . '/subtitles_api.php';
 
 function stream_normalize_lang($lang) {
@@ -92,6 +93,17 @@ function stream_resolve($info, $episode = 1, $lang = 'sub') {
         $cnError = null;
     }
 
+    // 1.65 ── ToonStream (Hindi / Indian dubs — and the sub cuts). Title-keyed
+    // like the extractor above, so no IMDb lookup is needed; it runs before the
+    // embed iframes because it hands our own player a direct stream.
+    if (toonstream_enabled()) {
+        $result = stream_try_toonstream($info, $episode, $lang);
+        if (!empty($result['ok'])) return stream_attach_sources($result, $info, $episode, $lang);
+        $toonstreamError = $result['message'] ?? null;
+    } else {
+        $toonstreamError = null;
+    }
+
     // 2 ── embed players
     if (STREAM_TRY_EMBEDS) {
         $result = stream_embed_payload($info, $episode, $lang);
@@ -104,6 +116,7 @@ function stream_resolve($info, $episode = 1, $lang = 'sub') {
     if (!empty($anikuroError)) $scraperError = $anikuroError;
     if (!empty($eightstreamError)) $scraperError = $eightstreamError;
     if (!empty($cnError)) $scraperError = $cnError;
+    if (!empty($toonstreamError)) $scraperError = $toonstreamError;
 
     return stream_failure(
         'No playable source found for this episode. Add or reorder embed providers in config/config.php.',
@@ -262,6 +275,41 @@ function stream_try_cn_extract($info, $episode, $lang) {
         'outro'      => null,
         'thumbnails' => null,
         'source'     => 'cn_extract',
+        'message'    => null,
+    ];
+}
+
+// ─── Attempt 1.65: ToonStream (Hindi / Indian dubs) ───────────────────
+
+/**
+ * Title-keyed, so the lookup is the catalogue title itself — no IMDb id, no
+ * session. The scraper returns one or two direct servers (priority order);
+ * stream_attach_sources appends the site-independent embeds behind them.
+ */
+function stream_try_toonstream($info, $episode, $lang) {
+    if (!toonstream_enabled()) {
+        return stream_failure('ToonStream is disabled.', $episode, $lang);
+    }
+
+    $res = toonstream_resolve($info, $episode, $lang);
+    if (empty($res['ok']) || empty($res['url'])) {
+        return stream_failure($res['message'] ?? 'ToonStream has no source for this title.', $episode, $lang);
+    }
+
+    return [
+        'ok'         => true,
+        'mode'       => 'hls',
+        'url'        => $res['url'],
+        'lang'       => $res['lang'] ?? 'any',
+        'audio_lang' => $res['audio_lang'] ?? null,
+        'episode'    => (int)$episode,
+        'servers'    => $res['servers'] ?? [],
+        'server_key' => $res['server_key'] ?? 'toonstream',
+        'subtitles'  => $res['subtitles'] ?? [],
+        'intro'      => null,
+        'outro'      => null,
+        'thumbnails' => null,
+        'source'     => 'toonstream',
         'message'    => null,
     ];
 }
@@ -517,8 +565,10 @@ function stream_chapter($chapter) {
  * so DUB is served from zokoanime.video — NHD's own upstream, verified to
  * carry a distinct dub stream on the very same hls CDN
  * (/stream/ani/{anilist}/{ep}/dub). Both variants resolve through our
- * resolver into the ArtPlayer; same chip, same key, so a remembered server
- * pick survives a SUB↔DUB switch.
+ * resolver into the ArtPlayer, so stream_embed_servers() emits them side by
+ * side as Auto HD [SUB] / Auto HD [DUB]. Each cut keeps its own key — a chip
+ * has to tell them apart for the active highlight, the remembered pick and
+ * the Server menu's ✓ to land on the right one.
  */
 function stream_nhd_anime_server($anilistId, $episode, $lang = 'sub') {
     $anilistId = (int)$anilistId;
@@ -527,7 +577,7 @@ function stream_nhd_anime_server($anilistId, $episode, $lang = 'sub') {
 
     if (strtolower((string)$lang) === 'dub') {
         return [
-            'key'      => 'nhd-anime',
+            'key'      => 'nhd-anime-dub',
             'label'    => 'Auto HD',
             'lang'     => 'dub',
             'mode'     => 'embed',
@@ -537,10 +587,14 @@ function stream_nhd_anime_server($anilistId, $episode, $lang = 'sub') {
         ];
     }
 
+    // SUB is a cut of its own, not a "both" wildcard: the queue now offers
+    // Auto HD [SUB] and Auto HD [DUB] side by side, and each chip has to
+    // carry its language for that to read right (and for its key to be
+    // distinct from the dub row's).
     return [
         'key'      => 'nhd-anime',
         'label'    => 'Auto HD',
-        'lang'     => 'any',
+        'lang'     => 'sub',
         'mode'     => 'embed',
         'url'      => 'https://nhdapi.com/anime/' . $anilistId . '/' . $episode,
         'dataLink' => null,
@@ -592,6 +646,41 @@ function stream_embed_payload($info, $episode, $lang) {
 }
 
 /**
+ * Would our own player take this embed URL over, or does it end up as an
+ * iframe? Only allowlisted hosts resolve inside ArtPlayer; everything else
+ * stays an iframe and is left alone by the cut expansion below.
+ */
+function stream_embed_host_is_custom($url) {
+    $host = strtolower((string)parse_url((string)$url, PHP_URL_HOST));
+    if ($host === '') return false;
+    return isset($GLOBALS['RESOLVER_ALLOWLIST'][$host]);
+}
+
+/**
+ * Which cuts of one lang-capable provider to list.
+ *
+ * A provider our resolver can play is emitted with BOTH cuts — the requested
+ * one first, so PHP's stable sort still hands the automatic first pick the
+ * language that was actually asked for. That is what turns one "MegaPlay
+ * [SUB]" row into MegaPlay [SUB] + MegaPlay [DUB] in the Server menu.
+ *
+ * An iframe-only provider gets the requested cut alone: it is never played
+ * inside ArtPlayer, so a second row would only ever open the same iframe.
+ *
+ * @return string[] one or two of 'sub' | 'dub'
+ */
+function stream_provider_cuts($urlTemplate, $lang, $anilistId, $malId, $episode) {
+    $lang = ($lang === 'dub') ? 'dub' : 'sub';
+    $probe = str_replace(
+        ['{anilist}', '{mal}', '{ep}', '{lang}', '{dub}'],
+        [$anilistId, $malId ?: $anilistId, $episode, $lang, $lang === 'dub' ? 'true' : 'false'],
+        (string)$urlTemplate
+    );
+    if (!stream_embed_host_is_custom($probe)) return [$lang];
+    return $lang === 'dub' ? ['dub', 'sub'] : ['sub', 'dub'];
+}
+
+/**
  * @param bool $healthCheck Run the HEAD-request health filter. Set false when
  *                          these embeds are only a fallback appended behind a
  *                          source that already resolved — the browser is the
@@ -613,32 +702,52 @@ function stream_embed_servers($info, $episode, $lang, $healthCheck = true) {
     // own relay and is the provider flagged primary, so it wins the first
     // pick below. NHD comes next (also primary — the health filter must
     // never drop it), then the plain fallbacks in config order.
+    //
+    // Providers our own player can take over are listed with both cuts (see
+    // stream_provider_cuts) and key themselves by cut — two rows of the same
+    // provider must be distinguishable by key, or the active highlight, the
+    // remembered pick and the Server menu's ✓ all land on the wrong one.
     $out = [];
     foreach (embed_providers() as $key => $provider) {
         $url = (string)($provider['url'] ?? '');
         if ($url === '') continue;
 
         $supportsLang = !empty($provider['lang']);
-        $dubValue = ($lang === 'dub') ? 'true' : 'false';
-        $resolved = str_replace(
-            ['{anilist}', '{mal}', '{ep}', '{lang}', '{dub}'],
-            [$anilistId, $malId ?: $anilistId, $episode, $lang, $dubValue],
-            $url
-        );
+        $cuts = $supportsLang
+            ? stream_provider_cuts($url, $lang, $anilistId, $malId, $episode)
+            : [$lang];
 
-        $out[] = [
-            'key'      => $key,
-            'label'    => $provider['label'] ?? ucfirst($key),
-            'lang'     => $supportsLang ? $lang : 'any',
-            'mode'     => 'embed',
-            'url'      => $resolved,
-            'dataLink' => null,
-            'primary'  => !empty($provider['primary']),
-        ];
+        foreach ($cuts as $cut) {
+            $dubValue = ($cut === 'dub') ? 'true' : 'false';
+            $resolved = str_replace(
+                ['{anilist}', '{mal}', '{ep}', '{lang}', '{dub}'],
+                [$anilistId, $malId ?: $anilistId, $episode, $cut, $dubValue],
+                $url
+            );
+
+            $out[] = [
+                'key'      => $supportsLang ? ($key . '-' . $cut) : $key,
+                'label'    => $provider['label'] ?? ucfirst($key),
+                'lang'     => $supportsLang ? $cut : 'any',
+                'mode'     => 'embed',
+                'url'      => $resolved,
+                'dataLink' => null,
+                'primary'  => !empty($provider['primary']),
+            ];
+        }
     }
 
-    $nhd = stream_nhd_anime_server($anilistId, $episode, $lang);
-    if ($nhd) $out[] = $nhd;
+    // NHD carries the same offer: its sub cut and its dub cut are both ours
+    // to play, so list both — requested one first.
+    $nhdLang = ($lang === 'dub') ? 'dub' : 'sub';
+    $nhdCuts = (stream_embed_host_is_custom('https://nhdapi.com/anime/1/1') &&
+                stream_embed_host_is_custom('https://zokoanime.video/stream/ani/1/1/dub'))
+        ? ($nhdLang === 'dub' ? ['dub', 'sub'] : ['sub', 'dub'])
+        : [$nhdLang];
+    foreach ($nhdCuts as $cut) {
+        $nhd = stream_nhd_anime_server($anilistId, $episode, $cut);
+        if ($nhd) $out[] = $nhd;
+    }
 
     if ($healthCheck) {
         $out = stream_filter_active_embeds($out);
@@ -738,7 +847,7 @@ function stream_build_sources($payload, $info, $episode, $lang) {
             'lang'       => $server['lang'] ?? 'any',
             'headers'    => null,
             'expires_at' => null,
-            'subtitles'  => [],
+            'subtitles'  => $server['subtitles'] ?? [],
             'intro'      => null,
             'outro'      => null,
             'audio'      => $server['audio'] ?? null,

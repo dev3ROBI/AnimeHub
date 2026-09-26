@@ -334,6 +334,55 @@ if (!defined('CNEXTRACT_RELAY_TTL')) define('CNEXTRACT_RELAY_TTL', 21600);// sig
  *  first — it is the platform's own track and the one a C-drama needs most. */
 if (!defined('CNEXTRACT_LANGS'))     define('CNEXTRACT_LANGS', 'zho,eng');
 
+// ─── ToonStream (Hindi / Indian dubs, plus the sub cuts) ──────────────
+// Title-keyed scrape of ToonStream's Next.js site: JSON search
+// (/search/all?q=) → /series|movies/{slug} → /episode/{slug}-{S}x{E}/ →
+// the episode page's server cards (Ruby / blakite / emturbovid / …) opened
+// until direct HLS/mp4 URLs fall out (no DRM, no login). Language markers
+// in the slug ("hindi", "tamil", "muse", "sony-yay" …) tag each server with
+// its audio ([DUB · Hindi] / [Multi Audio]); BOTH cuts of the title resolve
+// in one pass so the watch page can list every server with its language.
+//
+// Mirrors rotate often (.dad, .day, .in, .shop …); the base list is tried
+// in order, exactly like the 8Stream one below.
+if (!defined('TOONSTREAM_ENABLED'))    define('TOONSTREAM_ENABLED', true);
+if (!defined('TOONSTREAM_TIMEOUT'))    define('TOONSTREAM_TIMEOUT', 6);      // seconds per upstream hop
+if (!defined('TOONSTREAM_PAGE_TTL'))   define('TOONSTREAM_PAGE_TTL', 300);   // episode/series page (seconds)
+if (!defined('TOONSTREAM_SEARCH_TTL')) define('TOONSTREAM_SEARCH_TTL', 21600);
+if (!defined('TOONSTREAM_MAX_EMBEDS')) define('TOONSTREAM_MAX_EMBEDS', 7);   // embed attempts across both cuts
+if (!defined('TOONSTREAM_MAX_SERVERS')) define('TOONSTREAM_MAX_SERVERS', 5); // direct servers kept per episode
+if (!defined('TOONSTREAM_BUDGET'))     define('TOONSTREAM_BUDGET', 12);      // seconds for the whole resolve
+if (!isset($GLOBALS['TOONSTREAM_BASE_URLS'])) {
+    // Mirrors rotate — 2026-09 landscape: .us is the only one serving the
+    // real Next.js site (/series/… + /search/all JSON); .vip and .dad 301
+    // to it; .day is dead, .in parked, .shop runs a different site gen
+    // (/watch/{slug}-episode-{N}/) our parsers don't speak.
+    $GLOBALS['TOONSTREAM_BASE_URLS'] = [
+        'https://toonstream.us',
+        'https://toonstream.vip',
+        'https://toonstream.dad',
+    ];
+}
+
+// ─── FlixHQ (flixhq.vc) — servers for movies & TV ─────────────────────
+// Title-keyed scrape for the CUSTOM player: /search?keyword= → a
+// /watch-movie|/watch-series/{slug} page → its data-token → POST
+// /ajax/ajax.php (players= for movies, players_show= for episodes) →
+// the server list (FlixHQ / Vidmoly / Videasy) → the embed page's
+// plaintext sources config → direct HLS + the subget= caption JSON
+// (multi-language .vtt tracks). Language: English audio on every
+// server (chips read [English]); no dub concept on this site.
+if (!defined('FLIXHQ_ENABLED'))    define('FLIXHQ_ENABLED', true);
+if (!defined('FLIXHQ_TIMEOUT'))    define('FLIXHQ_TIMEOUT', 10);     // seconds per upstream hop
+if (!defined('FLIXHQ_PAGE_TTL'))   define('FLIXHQ_PAGE_TTL', 300);   // watch/episode page (seconds)
+if (!defined('FLIXHQ_SEARCH_TTL')) define('FLIXHQ_SEARCH_TTL', 21600);
+if (!defined('FLIXHQ_BUDGET'))     define('FLIXHQ_BUDGET', 12);      // seconds for the whole lookup
+if (!isset($GLOBALS['FLIXHQ_BASE_URLS'])) {
+    $GLOBALS['FLIXHQ_BASE_URLS'] = [
+        'https://flixhq.vc',
+    ];
+}
+
 // ─── Movie embed providers (fallback chain) ──────────────────────────
 if (!isset($GLOBALS['MOVIE_EMBED_PROVIDERS'])) {
     $GLOBALS['MOVIE_EMBED_PROVIDERS'] = [

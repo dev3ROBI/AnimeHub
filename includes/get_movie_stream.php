@@ -9,6 +9,7 @@ include_once __DIR__ . '/tmdb_movie_api.php';
 include_once __DIR__ . '/embed_movie.php';
 include_once __DIR__ . '/eightstream_api.php';
 include_once __DIR__ . '/cn_extract_api.php';
+include_once __DIR__ . '/flixhq_api.php';
 include_once __DIR__ . '/subtitles_api.php';
 
 header('Content-Type: application/json');
@@ -71,6 +72,22 @@ if (function_exists('cnx_enabled') && cnx_enabled()) {
 $sources = [];
 if ($eight) $sources[] = $eight;
 if ($cn && !empty($cn['url'])) $sources[] = $cn;
+
+/*
+ * FlixHQ third: direct HLS servers (Vidmoly + any other extractable host
+ * of the page) with the site's own multi-language caption tracks — these
+ * give the custom player real chips to switch between, tagged [English].
+ */
+$flix = [];
+if (flixhq_enabled()) {
+    $flixYear = (int)($detail['year'] ?? 0);
+    if ($flixYear <= 0 && !empty($detail['release_date'])) {
+        $flixYear = (int)substr((string)$detail['release_date'], 0, 4);
+    }
+    $flix = flixhq_source_entries((string)($detail['title'] ?? ''), $flixYear, 'movie');
+}
+foreach ($flix as $fe) $sources[] = $fe;
+
 foreach ($allServers as $srv) {
     if (empty($srv['url'])) continue;
     $sources[] = [
@@ -91,7 +108,9 @@ foreach ($allServers as $srv) {
 }
 
 // Whichever custom source took the top slot is what the player starts on.
-$primary = ($eight && !empty($eight['url'])) ? $eight : (($cn && !empty($cn['url'])) ? $cn : null);
+$primary = ($eight && !empty($eight['url'])) ? $eight
+         : (($cn && !empty($cn['url'])) ? $cn
+         : (!empty($flix[0]['url']) ? $flix[0] : null));
 
 $response = [
     'ok'         => true,

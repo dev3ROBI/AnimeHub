@@ -607,6 +607,7 @@ include_once './includes/header.php';
 
         <?php if ($is_api): ?>
         <div class="anikuro-controls">
+            <div id="kp-play-info"></div>
             <div id="lang-toggle"></div>
             <div id="server-chips"></div>
         </div>
@@ -631,6 +632,35 @@ include_once './includes/header.php';
                 position: relative;
                 overflow: visible;
             }
+
+            /* What is playing right now: server · language · quality · ep.
+               Own row above the chips so a long server list never pushes
+               it off-screen; empty (and out of the way) until a payload
+               names a source. */
+            #kp-play-info {
+                flex: 1 1 100%;
+                display: none;
+                align-items: center;
+                gap: 8px;
+                font-size: 12.5px;
+                color: #9aa3b8;
+                min-height: 18px;
+            }
+            #kp-play-info .kp-info-pill {
+                display: inline-flex;
+                align-items: center;
+                gap: 5px;
+                padding: 2px 9px;
+                border-radius: 999px;
+                background: rgba(255,255,255,.06);
+                border: 1px solid rgba(255,255,255,.10);
+                color: #c9d1e4;
+                font-size: 11.5px;
+                line-height: 1.5;
+                white-space: nowrap;
+            }
+            #kp-play-info .kp-info-pill i { color: #ff2e63; font-size: 10.5px; }
+            #kp-play-info .kp-info-dot { opacity: .35; }
 
             .tmdb-seasons-wrap { margin-bottom: 8px; }
             .tmdb-seasons-wrap h4 { margin-bottom: 6px; }
@@ -1320,9 +1350,7 @@ include_once './includes/header.php';
         const KPIcons = {
             server:   '<i class="kp-ic fas fa-server"></i>',
             audio:    '<i class="kp-ic fas fa-volume-high"></i>',
-            subtitle: '<i class="kp-ic fas fa-closed-captioning"></i>',
-            quality:  '<i class="kp-ic fas fa-gauge-high"></i>',
-            cc:       '<i class="kp-ic fas fa-closed-captioning"></i>'
+            style:    '<i class="kp-ic fas fa-text-height"></i>'
         };
 
         /**
@@ -1434,7 +1462,7 @@ include_once './includes/header.php';
         // in-player Server menu keeps it on, so switching server there never
         // dismisses ArtPlayer in favour of a foreign iframe.
         let autoHdMode = true;
-        let currentPrimary = null;    // queue entry the primary chip stands for
+        let currentPrimary = null;    // queue entry the info line / Server menu default stands for
         let entryTried = Object.create(null);   // queue index → started this run
         let iframeTried = Object.create(null);  // embed url → iframe already shown
         let playToken = 0;
@@ -1941,7 +1969,15 @@ include_once './includes/header.php';
                 setting: true,
                 flip: true,
                 pip: true,
-                subtitleOffset: true,
+                // The built-in "Subtitle Offset" row is gone from the root
+                // panel: it lives inside our Subtitle Style submenu now, so
+                // the panel opens exactly like the design — Play Speed /
+                // Aspect Ratio / Video Flip / Subtitle Style.
+                subtitleOffset: false,
+                // Registered at construction, so it lands right after the
+                // three built-in rows and before anything ready() adds
+                // (Server / Audio / Language / Skip …).
+                settings: [subtitleStyleSetting()],
                 autoMini: true,
                 lock: true,
                 fastForward: true,
@@ -1965,7 +2001,15 @@ include_once './includes/header.php';
                             });
                             hls.on(Hls.Events.LEVELS_UPDATED, function () {
                                 if (!art) return;
+                                art.hlsInstance = hls;
                                 addQualitySetting(art, hls);
+                            });
+                            // On Auto the bar label follows the level hls.js
+                            // is really playing (…720P) instead of "Auto".
+                            hls.on(Hls.Events.LEVEL_SWITCHED, function () {
+                                if (!art) return;
+                                kpQualityLabelLive(art, hls);
+                                renderPlayInfo();
                             });
                             hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, function () {
                                 if (!art) return;
@@ -2072,8 +2116,8 @@ include_once './includes/header.php';
 
             // Attach subtitles. The URL goes through the subtitle instance's
             // `url` setter (assigning `art.subtitle = …` would clobber the
-            // instance), and onSelect lives on the PARENT row — the setting
-            // panel never calls a child-level onSelect.
+            // instance). The track list lives on the bar as a text button
+            // ("English" / "Off"), not in the settings panel.
             if (subs.length) {
                 art.once('ready', function () {
                     art.kpSubRowAdded = true;
@@ -2120,104 +2164,47 @@ include_once './includes/header.php';
                             default: s === preferredSub
                         });
                     });
-                    art.setting.add({
-                        name: 'KPSub',
-                        html: 'Subtitles',
-                        icon: KPIcons.subtitle,
-                        tooltip: preferredSub ? (preferredSub.language || 'Subtitle') : 'Off',
-                        selector: subItems,
-                        onSelect: function (item) {
-                            var v = Number(item.value);
-                            var sub = v >= 0 ? subs[v] : null;
-                            applySub(sub);
-                            if (art.notice) {
-                                art.notice.show = sub
-                                    ? (sub.language || 'Subtitle') + ' selected'
-                                    : 'Subtitles off';
-                            }
-                            return item.html;
-                        }
-                    });
 
-                    // Bottom-bar CC button — quick subtitle on/off (plus the
-                    // track list) without opening the settings panel. The
-                    // control lights up while a caption track is active.
-                    function setCcOn(on) {
-                        try {
-                            // Controls are plain properties on the controller
-                            // (`art.controls['kp-cc']`) — there is no .get().
-                            var el = art.controls && art.controls['kp-cc'];
-                            if (el) el.classList.toggle('on', !!on);
-                        } catch (e) {}
-                    }
-                    art.controls.add({
-                        name: 'kp-cc',
+                    // Bottom-bar language button — the active track written
+                    // out ("English" / "Off") with the track list under it.
+                    // Replaces both the old CC icon and the Subtitles row in
+                    // the settings panel: captions and quality now live on
+                    // the bar, like the design.
+                    art.controls.update({
+                        name: 'kpSubLabel',
                         position: 'right',
-                        index: 31,
-                        html: '<span class="kp-ctl kp-ctl-cc">' + KPIcons.cc + '</span>',
+                        index: 12,
+                        html: preferredSub ? (preferredSub.language || 'Subtitle') : 'Off',
                         tooltip: preferredSub ? (preferredSub.language || 'Subtitle') : 'Off',
                         selector: subItems,
                         onSelect: function (item) {
                             var v = Number(item.value);
                             applySub(v >= 0 ? subs[v] : null);
-                            setCcOn(v >= 0);
+                            kpSetSubLabelOn(art, v >= 0);
                             if (art.notice) {
                                 art.notice.show = v >= 0
                                     ? ((subs[v].language || 'Subtitle') + ' selected')
                                     : 'Subtitles off';
                             }
                             return item.html;
-                        }
-                    });
-                    setCcOn(!!preferredSub);
-
-                    art.setting.add({
-                        name: 'SubtitleStyle',
-                        html: 'Subtitle size',
-                        tooltip: 'Normal',
-                        selector: [
-                            { html: 'Normal', value: '20px', default: true },
-                            { html: 'Large', value: '28px' },
-                            { html: 'Small', value: '16px' }
-                        ],
-                        onSelect: function (item) {
-                            art.subtitle.style({ fontSize: item.value });
-                            if (art.notice) art.notice.show = 'Subtitle size: ' + item.html;
-                            return item.html;
-                        }
-                    });
-
-                    art.setting.add({
-                        name: 'SubtitleBg',
-                        html: 'Subtitle background',
-                        tooltip: 'Default',
-                        selector: [
-                            { html: 'Default', value: '' },
-                            { html: 'Dark', value: 'rgba(0, 0, 0, 0.7)' },
-                            { html: 'Light', value: 'rgba(255, 255, 255, 0.85)' },
-                            { html: 'Transparent', value: 'transparent' }
-                        ],
-                        onSelect: function (item) {
-                            var light = item.value === 'rgba(255, 255, 255, 0.85)';
-                            art.subtitle.style({
-                                backgroundColor: item.value || 'transparent',
-                                color: light ? '#000' : '#fff'
-                            });
-                            if (art.notice) art.notice.show = 'Subtitle background: ' + item.html;
-                            return item.html;
+                        },
+                        mounted: function () {
+                            kpSetSubLabelOn(art, !!preferredSub);
                         }
                     });
                 });
             } else {
-                // This source carries no caption track, but the CC control stays
-                // on the bar anyway — it explains there is nothing to switch to
-                // instead of silently disappearing.
+                // No caption file on this source: the button still sits on
+                // the bar reading "Off" and says so when pressed, instead of
+                // silently disappearing. Skipped when an HLS manifest has
+                // already claimed the control with its own track list.
                 art.once('ready', function () {
-                    art.controls.add({
-                        name: 'kp-cc',
+                    if (art.controls && art.controls['kpSubLabel']) return;
+                    art.controls.update({
+                        name: 'kpSubLabel',
                         position: 'right',
-                        index: 31,
-                        html: '<span class="kp-ctl kp-ctl-cc">' + KPIcons.cc + '</span>',
+                        index: 12,
+                        html: 'Off',
                         tooltip: 'Subtitles',
                         click: function () {
                             if (art.notice) art.notice.show = 'No subtitles for this source';
@@ -2354,6 +2341,7 @@ include_once './includes/header.php';
                     key: o.key || null,
                     label: o.label || null,
                     lang: o.lang || 'any',
+                    audio_lang: o.audio_lang || null,
                     headers: null,
                     expires_at: null,
                     subtitles: o.subtitles || [],
@@ -2377,6 +2365,7 @@ include_once './includes/header.php';
                     key: payload.server_key || (meta && meta.key) || payload.source || 'primary',
                     label: meta ? meta.label : payload.source,
                     lang: payload.lang || 'any',
+                    audio_lang: payload.audio_lang || (meta && meta.audio_lang) || null,
                     subtitles: payload.subtitles || [],
                     intro: payload.intro,
                     outro: payload.outro
@@ -2391,16 +2380,22 @@ include_once './includes/header.php';
                     provider: s.provider || null,
                     key: s.key,
                     label: s.label,
-                    lang: s.lang
+                    lang: s.lang,
+                    audio_lang: s.audio_lang || null
                 });
             });
 
             return out;
         }
 
-        /** Entries the walk is allowed to land on for the current language. */
+        /**
+         * Entries the walk may land on. The lang filter is gone: every
+         * server now carries its own truthful tag on the chip, so falling
+         * through to the other language beats failing the episode — and
+         * the queue order already puts the requested cut first.
+         */
         function queueEntryPlayable(entry) {
-            return !entry.lang || entry.lang === currentMode || entry.lang === 'any';
+            return true;
         }
 
         /** Prefer the mirror this viewer picked last visit: move it to front. */
@@ -2675,6 +2670,7 @@ include_once './includes/header.php';
 
         /** Highlight the chip belonging to the entry now playing (if any). */
         function markActiveChip(entry) {
+            renderPlayInfo();
             if (!chipsEl || !entry || !entry.key) return;
             var wanted = String(entry.key);
             var target = null;
@@ -2699,6 +2695,7 @@ include_once './includes/header.php';
             resetResolverRun();
             applyRememberedServer();
             renderServers();
+            renderLangToggle();
             if (autoplay) playPayload();
             else { setState('gate'); updateGate(); }
         }
@@ -2707,11 +2704,11 @@ include_once './includes/header.php';
         // Rendered from the source queue itself: one chip per walkable entry,
         // so clicking chip N always lands on queue entry N.
         //
-        // Layout: [সার্ভার] [primary] [▾ অন্যান্য সার্ভার (N)] — the primary
-        // chip is our own player (labelled generically, never by provider) and
-        // every other server sits behind one toggle so the row stays a single
-        // line on mobile. The toggle is not a server: it carries no data-key,
-        // so markActiveChip/useServer never see it.
+        // Layout: [▾ More servers (N)] — one toggle, nothing else. It carries
+        // every server (the active one highlighted inside), so the redundant
+        // [সার্ভার] label and standalone primary chip are gone and the info
+        // line above names whatever is playing. The toggle is not a server:
+        // it carries no data-key, so markActiveChip/useServer never see it.
 
         /** Does this entry play through our own player (direct media / resolver)? */
         function isCustomPlayer(entry) {
@@ -2740,7 +2737,8 @@ include_once './includes/header.php';
             zokoanime: 'NHD',
             megaplay: 'MegaPlay',
             anikuro: 'Anikuro',
-            reanime: 'ReAnime'
+            reanime: 'ReAnime',
+            toonstream: 'ToonStream'
         };
 
         function serverBaseLabel(server, isPrimary) {
@@ -2751,11 +2749,28 @@ include_once './includes/header.php';
             return isPrimary ? 'Auto HD' : 'HD';
         }
 
+        /**
+         * The chip's language tag text: mode first, audio language second —
+         * "DUB · Hindi", "Multi Audio", "SUB", "" — shared by the outside
+         * chips, the More servers row and the in-player Server menu so one
+         * server never reads differently in two places.
+         */
+        function langTagText(s) {
+            if (!s) return '';
+            var parts = [];
+            if (s.lang && s.lang !== 'any') parts.push(String(s.lang).toUpperCase());
+            var audio = s.audio_lang || s.audioLang || null;
+            if (audio && String(audio).toLowerCase() !== String(s.lang || '').toLowerCase()) {
+                parts.push(String(audio));
+            }
+            return parts.join(' · ');
+        }
+
         function renderServers() {
             lastServers = sourceQueue;
             if (!chipsEl) return;
 
-            // Survive a re-render (SUB/DUB switch): keep the more-row open.
+            // Survive a re-render (server pick): keep the list open.
             var moreEl = chipsEl.querySelector('.kp-chip-more');
             var wasOpen = !!(moreEl && moreEl.classList.contains('open'));
 
@@ -2766,21 +2781,10 @@ include_once './includes/header.php';
                 return;
             }
 
-            var filtered = lastServers.filter(function (s) {
-                return !s.lang || s.lang === currentMode || s.lang === 'any';
-            });
-
-            if (!filtered.length) {
-                chipsEl.innerHTML = '<span style="color:#ff9999;">' +
-                    currentMode.toUpperCase() +
-                    ' has no servers.</span>';
-                return;
-            }
-
-            var lbl = document.createElement('span');
-            lbl.className = 'kp-chip-label';
-            lbl.innerHTML = '<i class="fas fa-server"></i> Server';
-            chipsEl.appendChild(lbl);
+            // Every server stays listed — the chip's own
+            // [DUB · Hindi] / [Multi Audio] tag says which language it
+            // carries, so the SUB/DUB mode no longer hides rows.
+            var filtered = lastServers;
 
             var wanted = rememberedServer();
 
@@ -2794,14 +2798,19 @@ include_once './includes/header.php';
                 btn.className = 'server-chip' + (isPrimary ? ' server-chip-primary' : '');
                 btn.dataset.key = server.key || '';
                 btn.dataset.url = server.url || '';
-                var langTag = (!server.lang || server.lang === 'any') ? '' : ' [' + server.lang.toUpperCase() + ']';
+                var lt = langTagText(server);
+                var langTag = lt ? ' [' + lt + ']' : '';
                 // Extracted sources are listed under their provider name
                 // (8Stream, VidCore, NHD…), which is the whole point of the
                 // row; "Auto HD" only covers an entry with no name at all.
                 var base = serverBaseLabel(server, isPrimary);
-                labelSeen[base] = (labelSeen[base] || 0) + 1;
-                var name = labelSeen[base] > 1 ? base + ' ' + labelSeen[base] : base;
-                btn.textContent = name + langTag;
+                // Dedupe on the *whole* caption: "MegaPlay [SUB]" and
+                // "MegaPlay [DUB]" are two different servers, not a repeat
+                // that needs a "2" — only genuinely identical rows do.
+                var full = base + langTag;
+                labelSeen[full] = (labelSeen[full] || 0) + 1;
+                var name = labelSeen[full] > 1 ? base + ' ' + labelSeen[full] + langTag : full;
+                btn.textContent = name;
                 btn.addEventListener('click', function () {
                     chipsEl.querySelectorAll('.server-chip').forEach(function (b) {
                         b.classList.remove('active');
@@ -2812,70 +2821,118 @@ include_once './includes/header.php';
                 return btn;
             }
 
-            // The primary chip is the FIRST entry our own player can actually
-            // take over. iframe-only servers move to the collapsed row —
-            // unless nothing at all extracts, in which case the first server
-            // stays primary under its real name.
+            // The primary entry is the FIRST one our own player can actually
+            // take over. It only decides which chip reads as active and what
+            // the info line above says — it is no longer a chip of its own.
             var primary = null;
             for (var pi = 0; pi < filtered.length; pi++) {
                 if (isCustomPlayer(filtered[pi])) { primary = filtered[pi]; break; }
             }
             if (!primary) primary = filtered[0];
             currentPrimary = primary;
-            var rest = filtered.filter(function (s) { return s !== primary; });
-            var primaryBtn = chipFor(primary, true);
-            chipsEl.appendChild(primaryBtn);
 
-            var moreBtn = null, moreWrap = null;
-            if (rest.length) {
-                moreBtn = document.createElement('button');
-                moreBtn.type = 'button';
-                moreBtn.className = 'kp-chip-more-btn';
-                moreBtn.setAttribute('aria-expanded', 'false');
-                moreBtn.innerHTML = '<i class="fas fa-layer-group"></i> More servers ' +
-                    '<span class="kp-chip-count">' + rest.length + '</span>';
-                chipsEl.appendChild(moreBtn);
-
-                moreWrap = document.createElement('div');
-                moreWrap.className = 'kp-chip-more' + (wasOpen ? ' open' : '');
-                rest.forEach(function (server) { moreWrap.appendChild(chipFor(server, false)); });
-                chipsEl.appendChild(moreWrap);
-
-                if (wasOpen) {
-                    moreBtn.classList.add('open');
-                    moreBtn.setAttribute('aria-expanded', 'true');
-                }
-                moreBtn.addEventListener('click', function () {
-                    var open = moreWrap.classList.toggle('open');
-                    moreBtn.classList.toggle('open', open);
-                    moreBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
-                });
+            // Nothing to collapse with a single server: render it directly,
+            // still without a "Server" label wrapped around it.
+            if (filtered.length === 1) {
+                var only = chipFor(primary, true);
+                only.classList.add('active');
+                chipsEl.appendChild(only);
+                renderPlayInfo();
+                return;
             }
 
-            // Highlight the remembered mirror, else the primary chip — and if
-            // the active one is parked in the collapsed row, open it so the
-            // viewer can see which server is actually playing.
+            // The whole row is the More servers toggle now — every entry,
+            // including the primary, lives inside it.
+            var moreBtn = document.createElement('button');
+            moreBtn.type = 'button';
+            moreBtn.className = 'kp-chip-more-btn';
+            moreBtn.setAttribute('aria-expanded', wasOpen ? 'true' : 'false');
+            moreBtn.innerHTML = '<i class="fas fa-layer-group"></i> More servers ' +
+                '<span class="kp-chip-count">' + filtered.length + '</span>';
+            chipsEl.appendChild(moreBtn);
+
+            var moreWrap = document.createElement('div');
+            moreWrap.className = 'kp-chip-more' + (wasOpen ? ' open' : '');
+            filtered.forEach(function (server) { moreWrap.appendChild(chipFor(server, server === primary)); });
+            chipsEl.appendChild(moreWrap);
+
+            if (wasOpen) moreBtn.classList.add('open');
+            moreBtn.addEventListener('click', function () {
+                var open = moreWrap.classList.toggle('open');
+                moreBtn.classList.toggle('open', open);
+                moreBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            });
+
+            // Highlight the remembered mirror, else the primary entry. The
+            // list is never force-opened: the info line above already names
+            // the server that is playing.
             var target = null;
+            var pool = moreWrap.querySelectorAll('.server-chip');
             if (wanted) {
-                chipsEl.querySelectorAll('.server-chip').forEach(function (b) {
-                    if (b.dataset.key === wanted) target = b;
-                });
+                pool.forEach(function (b) { if (b.dataset.key === wanted) target = b; });
             }
-            if (!target) target = primaryBtn;
-            target.classList.add('active');
-            if (moreWrap && target !== primaryBtn && moreWrap.contains(target)) {
-                moreWrap.classList.add('open');
-                moreBtn.classList.add('open');
-                moreBtn.setAttribute('aria-expanded', 'true');
+            if (!target) {
+                pool.forEach(function (b) { if (b.dataset.key === (primary.key || '')) target = b; });
             }
+            if (target) target.classList.add('active');
+            renderPlayInfo();
+        }
+
+        /**
+         * The info line above the chips: server · language · quality ·
+         * episode, refreshed whenever the playing entry or the quality
+         * changes. Hidden while nothing is resolved.
+         */
+        function renderPlayInfo() {
+            // Never let the decorative line break a player flow (quality
+            // picks depend on this call not throwing to return their
+            // labels) — swallow everything, worst case the line stays stale.
+            try {
+                var el = document.getElementById('kp-play-info');
+                if (!el) return;
+                var entry = (sourceIdx >= 0 && sourceQueue[sourceIdx]) ? sourceQueue[sourceIdx]
+                          : (currentPrimary || null);
+                if (!entry || !(entry.url || entry.dataLink)) {
+                    el.style.display = 'none';
+                    el.innerHTML = '';
+                    return;
+                }
+
+                var pills = [];
+                var name = serverBaseLabel(entry, entry === currentPrimary);
+                if (name) pills.push('<span class="kp-info-pill"><i class="fas fa-server"></i> ' + name + '</span>');
+                var lt = langTagText(entry);
+                if (lt) pills.push('<span class="kp-info-pill"><i class="fas fa-language"></i> ' + lt + '</span>');
+                // Quality as hls.js is really playing it (auto picks
+                // included); MP4 sources carry no hls instance and simply
+                // skip the pill.
+                if (art && art.hlsInstance) {
+                    var q = kpActiveQualityLabel(art.hlsInstance);
+                    if (q && q !== 'AUTO') {
+                        pills.push('<span class="kp-info-pill"><i class="fas fa-tv"></i> ' + q + '</span>');
+                    }
+                }
+                if (currentEp) {
+                    pills.push('<span class="kp-info-pill"><i class="fas fa-play"></i> Ep ' + currentEp +
+                        (KP.total ? ' / ' + KP.total : '') + '</span>');
+                }
+
+                el.style.display = 'flex';
+                el.innerHTML = pills.join('<span class="kp-info-dot">·</span>');
+            } catch (e) {}
         }
 
         // ─── In-player settings (mirrors of the outside controls) ──
 
         /**
-         * Add the সার্ভার + ভাষা rows to a freshly created player. Everything
+         * Add the সার্ভার + অডিও rows to a freshly created player. Everything
          * here is rebuilt per player, so the ✓ marks always describe what is
          * actually playing right now.
+         *
+         * There is deliberately NO Language row any more: SUB/DUB is chosen
+         * by picking the server that carries it (the Server menu and the
+         * chips row both tag every entry), which keeps one control instead
+         * of two that can disagree.
          */
         function addPlayerSettings(player) {
             if (!player || !player.setting) return;
@@ -2883,16 +2940,19 @@ include_once './includes/header.php';
             // সার্ভার — only embed/direct servers OUR player can take over:
             // the menu's promise is "click → auto-extract → ArtPlayer plays
             // it", so iframe-only providers stay out (they remain in the
-            // chips row outside). The setting panel calls the *parent*
-            // item's onSelect with the clicked child — a child-level
-            // onSelect is never invoked — so the switch lives on the parent,
-            // and `default` marks the actually-playing entry (pink).
+            // More servers row outside). Every cut of a playable provider
+            // gets its own row — MegaPlay [SUB] and MegaPlay [DUB] — which
+            // is how language is switched now that there is no Language row.
+            // The setting panel calls the *parent* item's onSelect with the
+            // clicked child — a child-level onSelect is never invoked — so
+            // the switch lives on the parent, and `default` marks the
+            // actually-playing entry (pink).
             var pool = (sourceQueue.length ? sourceQueue : lastServers).filter(function (s) {
-                return isCustomPlayer(s) &&
-                    (!s.lang || s.lang === currentMode || s.lang === 'any');
+                return isCustomPlayer(s);
             });
-            // The primary entry first — the one the outside chip stands for —
-            // then the other extractable servers, in queue order.
+            // The primary entry first — the one the info line above the
+            // chips stands for — then the other extractable servers, in
+            // queue order.
             var list = [];
             if (currentPrimary && pool.indexOf(currentPrimary) !== -1) list.push(currentPrimary);
             pool.forEach(function (s) { if (s !== currentPrimary) list.push(s); });
@@ -2901,12 +2961,16 @@ include_once './includes/header.php';
                 var seen = {};
                 var items = list.map(function (s, i) {
                     var base = serverBaseLabel(s, i === 0);
-                    seen[base] = (seen[base] || 0) + 1;
-                    var name = seen[base] > 1 ? base + ' ' + seen[base] : base;
-                    var tag = (!s.lang || s.lang === 'any') ? '' : ' [' + s.lang.toUpperCase() + ']';
+                    var lt = langTagText(s);
+                    var tag = lt ? ' [' + lt + ']' : '';
+                    // Same rule as the chips: a sub row and a dub row of the
+                    // same provider are two servers, so they are not "2".
+                    var full = base + tag;
+                    seen[full] = (seen[full] || 0) + 1;
+                    var name = seen[full] > 1 ? base + ' ' + seen[full] + tag : full;
                     var active = (sourceIdx >= 0 && sourceQueue[sourceIdx] && s === sourceQueue[sourceIdx]);
                     if (active) activeIdx = i;
-                    return { html: name + tag, value: i, default: active };
+                    return { html: name, value: i, default: active };
                 });
                 if (activeIdx < 0) { activeIdx = 0; items[0].default = true; }
                 player.setting.add({
@@ -2962,29 +3026,9 @@ include_once './includes/header.php';
                 });
             }
 
-            // ভাষা — SUB/DUB with the exact behaviour of the outside buttons.
-            // TMDB movie/TV pages have no language concept (external embeds).
-            if (!KP.isTmdbMovie && !KP.isTmdbTv) {
-                player.setting.add({
-                    name: 'KPLang',
-                    html: 'Language',
-                    icon: KPIcons.subtitle,
-                    tooltip: currentMode.toUpperCase(),
-                    selector: ['sub', 'dub'].map(function (m) {
-                        return { html: m.toUpperCase(), value: m, default: currentMode === m };
-                    }),
-                    onSelect: function (item) {
-                        var m = String(item.value);
-                        if (m !== currentMode) {
-                            currentMode = m;
-                            currentLang = m;
-                            renderLangToggle();
-                            resolve(currentEp, { autoplay: true, force: true });
-                        }
-                        return item.html;
-                    }
-                });
-            }
+            // ভাষা — no SUB/DUB row here any more: the Server menu and the
+            // outside chips carry every cut as its own tagged entry, so the
+            // language follows the server pick (see renderServers).
         }
 
         /**
@@ -3070,17 +3114,280 @@ include_once './includes/header.php';
             });
         }
 
+        // ─── Subtitle Style helpers ─────────────────────────────────
+        // The menu drives ArtPlayer's own CSS variables (font size, bottom
+        // offset) instead of inlining styles onto the cue layer, so the
+        // library's control-bar compensation keeps working, and Reset is
+        // simply "drop the inline override".
+
+        function kpSubHost(player) {
+            return (player && player.template) ? player.template.$player : null;
+        }
+
+        function kpApplySubColor(player, hex) {
+            try {
+                if (player && player.subtitle) player.subtitle.style({ color: hex || '' });
+            } catch (e) {}
+        }
+
+        function kpApplySubSize(player, pct) {
+            var host = kpSubHost(player);
+            if (host) host.style.setProperty('--art-subtitle-font-size', (20 * pct / 100) + 'px');
+        }
+
+        function kpApplySubPos(player, px) {
+            var host = kpSubHost(player);
+            if (host) host.style.setProperty('--art-subtitle-bottom', px + 'px');
+        }
+
+        function kpApplySubBg(player, on, opacity) {
+            var host = kpSubHost(player);
+            if (!host) return;
+            host.classList.toggle('kp-sub-bg', !!on);
+            host.style.setProperty('--kp-sub-bg-a', String(opacity));
+        }
+
+        /** Light the bar's language button while a caption track is active. */
+        function kpSetSubLabelOn(player, on) {
+            try {
+                // Controls are plain properties on the controller
+                // (`art.controls['kpSubLabel']`) — there is no .get().
+                var el = (player && player.controls) ? player.controls['kpSubLabel'] : null;
+                if (el) el.classList.toggle('on', !!on);
+            } catch (e) {}
+        }
+
         /**
-         * কোয়ালিটি row — every level the HLS manifest offers plus অটো (ABR).
-         * Rebuilt only when the level set actually changes; MP4 sources
-         * never call this (one file, one quality).
+         * "Subtitle Style" — the nested settings menu from the design:
+         * Color · Size · Position · Background (Enable + Opacity) · Reset ·
+         * Subtitle Offset. Returned as one root item for artOpts.settings so
+         * it lands fourth in the panel, right after Play Speed / Aspect
+         * Ratio / Video Flip (those three are ArtPlayer's own rows, whose
+         * labels already read exactly like the design).
+         *
+         * Everything below is plain data: ArtPlayer calls each handler with
+         * `this` bound to the player, a child with its own `selector` opens
+         * a sub-panel (with the ‹ back header), a *leaf* click runs the
+         * parent's onSelect with the leaf as its argument, and sliders /
+         * switches run their own onChange / onSwitch. Rows named `kps-*`
+         * are picked out by CSS to hide the left icon glyph — the design's
+         * submenu rows are text-only; the ✓ on a chosen color comes from
+         * ArtPlayer's own .art-current rules.
+         */
+        function subtitleStyleSetting() {
+            // ArtPlayer's shipped defaults for the two vars we drive.
+            var DEFAULT_SIZE = 20;     // --art-subtitle-font-size, px
+            var DEFAULT_BOTTOM = 15;   // --art-subtitle-bottom, px
+
+            // Background state shared by the Enable switch and the Opacity
+            // slider (each child only knows its own value).
+            var bgState = { on: false, opacity: 1 };
+
+            var colorItems = [
+                { name: 'kpcol-white',  html: 'White',  value: '#fff',    default: true },
+                { name: 'kpcol-yellow', html: 'Yellow', value: '#ffd54a' },
+                { name: 'kpcol-red',    html: 'Red',    value: '#ff5252' },
+                { name: 'kpcol-green',  html: 'Green',  value: '#4caf50' }
+            ];
+
+            var sizeItem = {
+                name: 'kps-size',
+                html: 'Size',
+                range: [100, 50, 200, 5],
+                tooltip: '100%',
+                onChange: function (item) {
+                    kpApplySubSize(this, item.range[0]);
+                    return item.range[0] + '%';
+                }
+            };
+
+            var posItem = {
+                name: 'kps-position',
+                html: 'Position',
+                range: [DEFAULT_BOTTOM, 0, 100, 1],
+                tooltip: '',
+                onChange: function (item) {
+                    kpApplySubPos(this, item.range[0]);
+                    return '';
+                }
+            };
+
+            var bgEnableItem = {
+                name: 'kps-bg-enable',
+                html: 'Enable',
+                switch: false,
+                tooltip: 'Close',
+                onSwitch: function (item) {
+                    bgState.on = !item.switch;
+                    kpApplySubBg(this, bgState.on, bgState.opacity);
+                    item.tooltip = bgState.on ? 'Open' : 'Close';
+                    return bgState.on;
+                }
+            };
+
+            var bgOpacityItem = {
+                name: 'kps-bg-opacity',
+                html: 'Opacity',
+                range: [1, 0, 1, 0.05],
+                tooltip: '1',
+                onChange: function (item) {
+                    bgState.opacity = Math.round(item.range[0] * 100) / 100;
+                    kpApplySubBg(this, bgState.on, bgState.opacity);
+                    return String(bgState.opacity);
+                }
+            };
+
+            var colorItem = {
+                name: 'kps-color',
+                html: 'Color',
+                selector: colorItems,
+                onSelect: function (item) {
+                    kpApplySubColor(this, item.value);
+                    return item.html;
+                }
+            };
+
+            var bgItem = {
+                name: 'kps-bg',
+                html: 'Background',
+                selector: [bgEnableItem, bgOpacityItem]
+            };
+
+            var yesItem = { name: 'kps-reset-yes', html: 'Yes', value: 1 };
+            var noItem  = { name: 'kps-reset-no',  html: 'No',  value: 0 };
+
+            var resetItem = {
+                name: 'kps-reset',
+                html: 'Reset',
+                selector: [yesItem, noItem],
+                onSelect: function (item) {
+                    if (Number(item.value)) resetAll(this);
+                    return '';   // the row carries no value in the design
+                }
+            };
+
+            var offsetItem = {
+                name: 'kps-offset',
+                html: 'Subtitle Offset',
+                range: [0, -10, 10, 0.1],
+                tooltip: '0s',
+                onChange: function (item) {
+                    var v = Math.round(item.range[0] * 10) / 10;   // 0.1 float noise
+                    this.subtitleOffset = v;
+                    return v + 's';
+                },
+                mounted: function (_$dom, item) {
+                    this.on('subtitleOffset', function (value) {
+                        if (item.$range) item.$range.value = value;
+                        item.tooltip = value + 's';
+                    });
+                }
+            };
+
+            // Yes → put the *looks* and the *rows* back to their defaults.
+            // The panel is already back at the Subtitle Style level (ArtPlayer
+            // navigates there before onSelect runs); check(White) just re-syncs
+            // the Color row's value text and ✓ marks.
+            function resetAll(art) {
+                kpApplySubColor(art, '');
+                kpApplySubSize(art, 100);
+                kpApplySubPos(art, DEFAULT_BOTTOM);
+                bgState.on = false;
+                bgState.opacity = 1;
+                kpApplySubBg(art, false, 1);
+                try { art.subtitleOffset = 0; } catch (e) {}
+
+                sizeItem.range = [100, 50, 200, 5];
+                sizeItem.tooltip = '100%';
+                posItem.range = [DEFAULT_BOTTOM, 0, 100, 1];
+                posItem.tooltip = '';
+                bgEnableItem.switch = false;
+                bgEnableItem.tooltip = 'Close';
+                bgOpacityItem.range = [1, 0, 1, 0.05];
+                bgOpacityItem.tooltip = '1';
+                offsetItem.range = [0, -10, 10, 0.1];
+                offsetItem.tooltip = '0s';
+                [yesItem, noItem].forEach(function (it) {
+                    it.default = false;
+                    if (it.$item) it.$item.classList.remove('art-current');
+                });
+
+                try { art.setting.check(colorItems[0]); } catch (e) {}
+                if (art.notice) art.notice.show = 'Subtitle style reset';
+            }
+
+            return {
+                name: 'kpSubtitleStyle',
+                html: 'Subtitle Style',
+                icon: KPIcons.style,
+                selector: [colorItem, sizeItem, posItem, bgItem, resetItem, offsetItem]
+            };
+        }
+
+        // ─── Quality button on the bar ──────────────────────────────
+
+        /**
+         * Human label for one HLS level — "720P" (uppercase on the bar, like
+         * the design), with a bitrate suffix only when the manifest offers
+         * the same height twice.
+         */
+        function kpLevelLabel(levels, idx, dup) {
+            var lv = levels[idx] || {};
+            if (!lv.height) return Math.round((lv.bitrate || 0) / 1000) + 'kbps';
+            var base = (lv.height + 'p').toUpperCase();
+            if (dup && dup[lv.height + 'p'] > 1) {
+                base += ' · ' + Math.round((lv.bitrate || 0) / 1000) + 'kbps';
+            }
+            return base;
+        }
+
+        /** Label for whatever hls.js is actually playing right now. */
+        function kpActiveQualityLabel(hls) {
+            var levels = (hls && hls.levels) || [];
+            var idx = hls ? hls.currentLevel : -1;
+            if (idx == null || idx < 0) {
+                idx = (hls && typeof hls.latestLevel === 'number' && hls.latestLevel >= 0)
+                    ? hls.latestLevel
+                    : (hls ? hls.loadLevel : -1);
+            }
+            if (idx == null || idx < 0 || !levels[idx]) {
+                // Nothing switched yet — the highest level is a fair guess;
+                // LEVEL_SWITCHED overwrites it as soon as ABR decides.
+                for (var i = levels.length - 1; i >= 0; i--) {
+                    if (levels[i] && levels[i].height) { idx = i; break; }
+                }
+            }
+            if (!levels[idx]) return 'AUTO';
+            return kpLevelLabel(levels, idx, null);
+        }
+
+        /** While the picker sits on Auto, the bar follows the live level. */
+        function kpQualityLabelLive(player, hls) {
+            if (!player || !player.kpQualityCount) return;   // no button yet
+            if (hls && hls.currentLevel !== -1) return;       // a manual pick wins
+            var el = player.controls && player.controls['kpQuality'];
+            if (!el) return;
+            var val = el.querySelector('.art-selector-value');
+            if (val) val.textContent = kpActiveQualityLabel(hls);
+        }
+
+        /**
+         * Quality button — every level the HLS manifest offers plus Auto,
+         * written as the current label ("720P"). Rebuilt only when the level
+         * set actually changes; MP4 sources never call this (one file, no
+         * button).
          */
         function addQualitySetting(player, hls) {
-            if (!player || !player.setting || !hls) return;
+            if (!player || !player.controls || !hls) return;
             var levels = hls.levels || [];
-            if (levels.length <= 1) return;
+            if (levels.length <= 1) {
+                if (player.kpQualityCount) {
+                    try { player.controls.remove('kpQuality'); } catch (e) {}
+                    player.kpQualityCount = 0;
+                }
+                return;
+            }
             if (player.kpQualityCount === levels.length) return;
-            if (player.kpQualityCount) { try { player.setting.remove('KPQuality'); } catch (e) {} }
             player.kpQualityCount = levels.length;
 
             var dup = {};
@@ -3096,43 +3403,44 @@ include_once './includes/header.php';
                 return ((levels[b] && levels[b].bitrate) || 0) - ((levels[a] && levels[a].bitrate) || 0);
             });
 
-            function labelOf(idx) {
-                var lv = levels[idx] || {};
-                var base = lv.height
-                    ? lv.height + 'p'
-                    : Math.round((lv.bitrate || 0) / 1000) + 'kbps';
-                if (lv.height && dup[lv.height + 'p'] > 1) {
-                    base += ' · ' + Math.round((lv.bitrate || 0) / 1000) + 'kbps';
-                }
-                return base;
-            }
-
             var items = [{ html: 'Auto', value: -1, default: hls.currentLevel === -1 }];
             order.forEach(function (idx) {
-                items.push({ html: labelOf(idx), value: idx, default: hls.currentLevel === idx });
+                items.push({
+                    html: kpLevelLabel(levels, idx, dup),
+                    value: idx,
+                    default: hls.currentLevel === idx
+                });
             });
 
-            player.setting.add({
-                name: 'KPQuality',
-                html: 'Quality',
-                icon: KPIcons.quality,
-                tooltip: hls.currentLevel === -1 ? 'Auto' : labelOf(hls.currentLevel),
+            var active = hls.currentLevel === -1
+                ? kpActiveQualityLabel(hls)
+                : kpLevelLabel(levels, hls.currentLevel, dup);
+
+            player.controls.update({
+                name: 'kpQuality',
+                position: 'right',
+                index: 14,
+                html: active,
+                tooltip: 'Quality',
                 selector: items,
                 onSelect: function (item) {
                     var v = Number(item.value);
                     hls.currentLevel = v;
+                    renderPlayInfo();
                     if (player.notice) player.notice.show = item.html + ' selected';
-                    return item.html;
+                    // Back to Auto → the label resumes following the stream.
+                    return v === -1 ? kpActiveQualityLabel(hls) : item.html;
                 }
             });
         }
 
         /**
-         * সাবটাইটেল row for captions carried inside the HLS manifest — only
-         * when the resolver gave us no external files (one row, never two).
+         * Captions carried inside the HLS manifest — they fill the bar's
+         * language button, but only when the resolver gave us no external
+         * files (one list, never two).
          */
         function addHlsSubtitleSetting(player, hls) {
-            if (!player || !player.setting || !hls) return;
+            if (!player || !player.controls || !hls) return;
             if (player.kpExtSubs || player.kpSubRowAdded || player.kpHlsSubAdded) return;
             var tracks = hls.subtitleTracks;
             if (!tracks || !tracks.length) return;
@@ -3143,22 +3451,33 @@ include_once './includes/header.php';
             for (var i = 0; i < tracks.length; i++) {
                 (function (idx) {
                     var t = tracks[idx] || {};
-                    var label = t.name || t.label || ('Subtitle ' + (idx + 1));
-                    if (t.language && label.indexOf(t.language) === -1) label += ' (' + t.language + ')';
+                    // Keep the bar clean: the resolved name (or language
+                    // code) only — no "English (eng)" suffix.
+                    var label = t.name || t.label || t.language || ('Subtitle ' + (idx + 1));
                     items.push({ html: label, value: idx, default: hls.subtitleTrack === idx });
                 })(i);
             }
             var cur = items.filter(function (it) { return it.default; })[0];
-            player.setting.add({
-                name: 'KPSub',
-                html: 'Subtitles',
-                icon: KPIcons.subtitle,
-                tooltip: cur ? cur.html : 'Off',
+            var label = cur ? cur.html : 'Off';
+            player.controls.update({
+                name: 'kpSubLabel',
+                position: 'right',
+                index: 12,
+                html: label,
+                tooltip: label,
                 selector: items,
+                // The "no captions at all" control may have been mounted
+                // before the manifest reported its tracks — clear its click
+                // (the validator accepts `undefined`, not `null`).
+                click: undefined,
                 onSelect: function (item) {
                     hls.subtitleTrack = Number(item.value);
+                    kpSetSubLabelOn(player, Number(item.value) >= 0);
                     if (player.notice) player.notice.show = item.html;
                     return item.html;
+                },
+                mounted: function () {
+                    kpSetSubLabelOn(player, hls.subtitleTrack >= 0);
                 }
             });
         }
@@ -3193,7 +3512,17 @@ include_once './includes/header.php';
             langEl.innerHTML = '';
 
             // TMDB movies/TV use external embeds with their own language controls
-            if (KP.isTmdbMovie || KP.isTmdbTv) return;
+            if (KP.isTmdbMovie || KP.isTmdbTv) { langEl.style.display = 'none'; return; }
+
+            // Custom player: the chips row already lists every server with
+            // its own [DUB · Hindi] tag, so the outside SUB/DUB switch is
+            // redundant — it only matters for external iframes. The mode
+            // itself follows the picked server (see renderServers).
+            if (payload && payload.ok && payload.mode !== 'embed') {
+                langEl.style.display = 'none';
+                return;
+            }
+            langEl.style.display = '';
 
             /* SUB button — Japanese audio + English sub */
             var subBtn = document.createElement('button');
@@ -3275,6 +3604,7 @@ include_once './includes/header.php';
                     key: server.key,
                     label: server.label,
                     lang: server.lang || 'any',
+                    audio_lang: server.audio_lang || null,
                     headers: null,
                     expires_at: null,
                     subtitles: [],
@@ -3337,7 +3667,7 @@ include_once './includes/header.php';
 
             if (gateSource) {
                 const source = (payload && payload.source) ? String(payload.source).replace('embed:', '') : KP.provider;
-                gateSource.textContent = source || '—';
+                gateSource.textContent = (source && KP_PROVIDER_NAMES[String(source).toLowerCase()]) || source || '—';
             }
 
             var at = resumeTargetFor(currentEp);
@@ -3387,6 +3717,10 @@ include_once './includes/header.php';
 
             currentEp = ep;
             payload = null;
+            // The toggle comes back while nothing is resolved (and stays if
+            // this attempt fails) — commitPayload re-hides it only when a
+            // custom-player payload actually lands.
+            renderLangToggle();
             // Drop the old queue and retire every attempt still in flight:
             // failure callbacks keyed to the previous token go quiet here.
             sourceQueue = [];

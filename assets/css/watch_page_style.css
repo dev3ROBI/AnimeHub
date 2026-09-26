@@ -874,8 +874,8 @@
   font-weight: 600;
 }
 
-/* "▾ অন্যান্য সার্ভার (N)" toggle — not a server, so it stays out of the
-   .server-chip active-state machinery entirely. */
+/* "▾ More servers (N)" toggle — the whole chips row now; not a server, so it
+   stays out of the .server-chip active-state machinery entirely. */
 .kp-chip-more-btn {
   padding: 6px 12px;
   border-radius: 20px;
@@ -2334,6 +2334,19 @@ button.report-option {
   color: #ff2e63;
 }
 
+/* ...but that accent must NOT leak into the picker the control opens: the
+   selector list is a DOM child of the control, so every row would inherit the
+   pink and the selected one become impossible to pick out. Rows read plain
+   white; only `.art-current` (ArtPlayer's own marker) keeps the accent.
+   Same deal for the quality list — both hang off an `.art-control`. */
+#artplayer .art-selector-list .art-selector-item {
+  color: #fff;
+}
+
+#artplayer .art-selector-list .art-selector-item.art-current {
+  color: #ff2e63;
+}
+
 /* ----------------------------------------------------------------------
    ArtPlayer settings panel — fit it to the player
 
@@ -2405,5 +2418,85 @@ button.report-option {
 
   #artplayer .art-selector-list .art-selector-item {
     padding: 12px 16px;
+  }
+}
+
+/* ----------------------------------------------------------------------
+   ArtPlayer — bar text buttons + Subtitle Style menu
+
+   The bar carries two plain-language buttons in front of the gear, exactly
+   like the design: the current caption track ("English" / "Off") and the
+   current quality ("720P"). ArtPlayer gives every control the icon-box
+   treatment, so the text needs its own sizing; the rest of this block is
+   the nested Subtitle Style menu (iconless rows, pink slider knobs, the
+   caption background box).
+   ------------------------------------------------------------------ */
+#artplayer .art-control-kpSubLabel,
+#artplayer .art-control-kpQuality {
+  font-size: 13px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  padding: 0 6px;
+}
+
+/* Hover / active-track states use the site accent (the `.on` rule above
+   already covers a lit caption button for any control class). */
+#artplayer .art-controls .art-control-kpSubLabel:hover,
+#artplayer .art-controls .art-control-kpQuality:hover {
+  color: #ff2e63;
+}
+
+/* Submenu rows (Color / Size / Position / Background / Reset / Offset and
+   their children) are text-only in the design — ArtPlayer would print a
+   gear glyph in every row's icon slot. Hide the glyph, keep the slot, so
+   the labels stay aligned with the root rows. Names are ours: everything
+   named `kps-*` is one of those rows. */
+#artplayer .art-settings .art-setting-item[data-name^="kps-"] .art-setting-item-left-icon {
+  visibility: hidden;
+}
+
+/* Reset's Yes/No are plain rows in the design — no selected-row tint. */
+#artplayer .art-settings .art-setting-item[data-name^="kps-reset-"].art-current {
+  color: inherit;
+}
+
+/* Slider knobs in the Subtitle Style menu (ArtPlayer ships them browser-
+   grey and appearance:none removes the accent-color fallback). */
+#artplayer .art-settings .art-setting-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border: none;
+  border-radius: 50%;
+  background: #ff2e63;
+  cursor: pointer;
+}
+
+#artplayer .art-settings .art-setting-range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: none;
+  border-radius: 50%;
+  background: #ff2e63;
+  cursor: pointer;
+}
+
+/* Caption background box (Subtitle Style → Background → Enable). The
+   subtitle layer is a centered flex column, so a background on each line
+   hugs the text like the design instead of drawing a full-width band.
+   Opacity rides on the variable the menu writes. */
+#artplayer .art-video-player.kp-sub-bg .art-subtitle-line {
+  background: rgba(0, 0, 0, var(--kp-sub-bg-a, 1));
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+@media (max-width: 480px) {
+  #artplayer .art-control-kpSubLabel,
+  #artplayer .art-control-kpQuality {
+    font-size: 12px;
+    padding: 0 4px;
   }
 }
